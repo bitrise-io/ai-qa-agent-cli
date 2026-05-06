@@ -241,13 +241,9 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		logf("uploaded %s -> %s", createUpload, actualPath)
 
 		if createWaitForAgent {
-			logf("waiting for the in-VM launcher to start Claude in tmux (Claude will then run wait-for-deps.sh itself)...")
-			if _, err := client.WaitForAgentLaunch(ctx, session.ID, createWorkspace, createPollInterval, func(s codespaces.AgentSessionStatus) {
-				logf("  agent_session_status: %s", s)
-			}); err != nil {
+			if _, err := client.WaitForAgentLaunch(ctx, session.ID, createWorkspace, createPollInterval, nil); err != nil {
 				return fmt.Errorf("waiting for agent launch: %w", err)
 			}
-			logf("Claude launched; the in-VM tmux session 'claude-auto' is live (the codespaces UI's 'open Claude' button picks it up; over SSH use `tmux attach -t claude-auto`)")
 		}
 	}
 
