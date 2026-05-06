@@ -5,6 +5,8 @@
 
 # requires BITRISE_PAT
 
+GOOS=darwin GOARCH=arm64 go build -o /tmp/hello-rde ./examples/hello
+
 go run main.go \
     --endpoint localhost:9000 --insecure \
     session create \
