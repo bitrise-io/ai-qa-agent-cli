@@ -68,6 +68,10 @@ func (c *Client) do(ctx context.Context, method, relPath string, body, resp any)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.pat)
+	// Mirror bitrise-mcp-dev-environments — gives the codespaces backend
+	// a way to attribute traffic in logs.
+	req.Header.Set("User-Agent", "ai-qa-agent-cli/0.1.0")
+	req.Header.Set("X-Request-Source", "cli")
 
 	httpResp, err := c.http.Do(req)
 	if err != nil {
