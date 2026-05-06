@@ -3,30 +3,22 @@ package codespaces
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 )
 
 // Client is a thin HTTP wrapper around the bitrise-codespaces gRPC-gateway.
-// Requests and responses are still proto messages; protojson handles the
-// JSON wire format that the gateway speaks.
+// Requests and responses are plain Go structs with json tags that match
+// protojson's lowerCamelCase wire format — see types.go.
 type Client struct {
 	baseURL string
 	pat     string
 	http    *http.Client
-
-	// jsonOpts mirrors what bitrise-codespaces/backend's gateway sends:
-	// lowerCamelCase fields, enums as numeric strings or names — protojson's
-	// defaults match.
-	marshal   protojson.MarshalOptions
-	unmarshal protojson.UnmarshalOptions
 }
 
 // NewClient constructs a Client. baseURL must be an absolute URL with scheme
@@ -43,10 +35,9 @@ func NewClient(baseURL, pat string) (*Client, error) {
 		return nil, fmt.Errorf("invalid base URL %q (need scheme://host[:port])", baseURL)
 	}
 	return &Client{
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		pat:       pat,
-		http:      &http.Client{Timeout: 10 * time.Minute},
-		unmarshal: protojson.UnmarshalOptions{DiscardUnknown: true},
+		baseURL: strings.TrimRight(baseURL, "/"),
+		pat:     pat,
+		http:    &http.Client{Timeout: 10 * time.Minute},
 	}, nil
 }
 
@@ -55,12 +46,12 @@ func NewClient(baseURL, pat string) (*Client, error) {
 func (c *Client) Close() error { return nil }
 
 // do issues a JSON request to a path relative to the base URL. body and resp
-// are optional proto messages; pass nil to skip either side. Non-2xx
-// responses are wrapped in *httpError so FormatError can expand them.
-func (c *Client) do(ctx context.Context, method, relPath string, body, resp proto.Message) error {
+// are optional; pass nil to skip either side. Non-2xx responses are wrapped
+// in *httpError so FormatError can expand them.
+func (c *Client) do(ctx context.Context, method, relPath string, body, resp any) error {
 	var rdr io.Reader
 	if body != nil {
-		raw, err := c.marshal.Marshal(body)
+		raw, err := json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("marshal %s body: %w", relPath, err)
 		}
@@ -97,7 +88,7 @@ func (c *Client) do(ctx context.Context, method, relPath string, body, resp prot
 		}
 	}
 	if resp != nil && len(raw) > 0 {
-		if err := c.unmarshal.Unmarshal(raw, resp); err != nil {
+		if err := json.Unmarshal(raw, resp); err != nil {
 			return fmt.Errorf("%s %s: unmarshal response: %w", method, fullURL, err)
 		}
 	}

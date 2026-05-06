@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-
-	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 )
 
 // DownloadDir asks the codespaces backend to tar+gzip sourcePath on the VM
@@ -44,20 +42,20 @@ func (c *Client) DownloadDir(
 		return nil, fmt.Errorf("create %s: %w", destDir, err)
 	}
 
-	req := &codespacesv1.SessionDownloadRequest{
-		SessionId:            sessionID,
-		WorkspaceId:          workspaceID,
+	req := &SessionDownloadRequest{
+		SessionID:            sessionID,
+		WorkspaceID:          workspaceID,
 		SourcePath:           sourcePath,
 		OnlyContentsOfFolder: onlyContents,
 	}
-	var resp codespacesv1.SessionDownloadResponse
+	var resp SessionDownloadResponse
 	p := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/download",
 		url.PathEscape(workspaceID), url.PathEscape(sessionID))
 	if err := c.do(ctx, http.MethodPost, p, req, &resp); err != nil {
 		return nil, fmt.Errorf("SessionDownload: %w", err)
 	}
 
-	signedURL := resp.GetSignedUrl()
+	signedURL := resp.SignedURL
 	if signedURL == "" {
 		return nil, fmt.Errorf("SessionDownload returned an empty signed URL")
 	}

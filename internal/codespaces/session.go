@@ -6,55 +6,53 @@ import (
 	"net/http"
 	"net/url"
 	"time"
-
-	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 )
 
-func (c *Client) CreateSession(ctx context.Context, req *codespacesv1.CreateSessionRequest) (*codespacesv1.Session, error) {
-	if req.GetWorkspaceId() == "" {
+func (c *Client) CreateSession(ctx context.Context, req *CreateSessionRequest) (*Session, error) {
+	if req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
 	}
-	var resp codespacesv1.CreateSessionResponse
-	p := fmt.Sprintf("/v1/workspaces/%s/sessions", url.PathEscape(req.GetWorkspaceId()))
+	var resp CreateSessionResponse
+	p := fmt.Sprintf("/v1/workspaces/%s/sessions", url.PathEscape(req.WorkspaceID))
 	if err := c.do(ctx, http.MethodPost, p, req, &resp); err != nil {
 		return nil, err
 	}
-	return resp.GetSession(), nil
+	return resp.Session, nil
 }
 
-func (c *Client) getSession(ctx context.Context, sessionID, workspaceID string) (*codespacesv1.Session, error) {
-	var resp codespacesv1.GetSessionResponse
+func (c *Client) getSession(ctx context.Context, sessionID, workspaceID string) (*Session, error) {
+	var resp GetSessionResponse
 	p := fmt.Sprintf("/v1/workspaces/%s/sessions/%s", url.PathEscape(workspaceID), url.PathEscape(sessionID))
 	if err := c.do(ctx, http.MethodGet, p, nil, &resp); err != nil {
 		return nil, err
 	}
-	return resp.GetSession(), nil
+	return resp.Session, nil
 }
 
-func (c *Client) OpenRemoteAccess(ctx context.Context, sessionID, workspaceID string) (*codespacesv1.Session, error) {
-	var resp codespacesv1.OpenRemoteAccessResponse
-	body := &codespacesv1.OpenRemoteAccessRequest{
-		SessionId:   sessionID,
-		WorkspaceId: workspaceID,
+func (c *Client) OpenRemoteAccess(ctx context.Context, sessionID, workspaceID string) (*Session, error) {
+	var resp OpenRemoteAccessResponse
+	body := &OpenRemoteAccessRequest{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
 	}
 	p := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/open-remote-access", url.PathEscape(workspaceID), url.PathEscape(sessionID))
 	if err := c.do(ctx, http.MethodPost, p, body, &resp); err != nil {
 		return nil, err
 	}
-	return resp.GetSession(), nil
+	return resp.Session, nil
 }
 
-func (c *Client) StopSession(ctx context.Context, sessionID, workspaceID string) (*codespacesv1.Session, error) {
-	var resp codespacesv1.StopSessionResponse
-	body := &codespacesv1.StopSessionRequest{
-		SessionId:   sessionID,
-		WorkspaceId: workspaceID,
+func (c *Client) StopSession(ctx context.Context, sessionID, workspaceID string) (*Session, error) {
+	var resp StopSessionResponse
+	body := &StopSessionRequest{
+		SessionID:   sessionID,
+		WorkspaceID: workspaceID,
 	}
 	p := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/stop", url.PathEscape(workspaceID), url.PathEscape(sessionID))
 	if err := c.do(ctx, http.MethodPost, p, body, &resp); err != nil {
 		return nil, err
 	}
-	return resp.GetSession(), nil
+	return resp.Session, nil
 }
 
 // WaitForAgentIdle polls GetSession until the in-VM agent reaches IDLE (i.e.
@@ -63,8 +61,8 @@ func (c *Client) StopSession(ctx context.Context, sessionID, workspaceID string)
 // observed IDLE.
 //
 // We deliberately gate IDLE acceptance on having seen at least one
-// non-UNSPECIFIED status first — a freshly-created session is UNSPECIFIED
-// (0), and our template's watcher fires AGENT_WORKING right after launching
+// non-UNSPECIFIED status first — a freshly-created session is UNSPECIFIED,
+// and our template's watcher fires AGENT_WORKING right after launching
 // Claude, so the gate ensures we don't false-positive on the initial zero
 // value before Claude has even started.
 //
@@ -75,12 +73,12 @@ func (c *Client) WaitForAgentIdle(
 	ctx context.Context,
 	sessionID, workspaceID string,
 	interval time.Duration,
-	onStatus func(codespacesv1.AgentSessionStatus),
-) (*codespacesv1.Session, error) {
+	onStatus func(AgentSessionStatus),
+) (*Session, error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	var last codespacesv1.AgentSessionStatus = codespacesv1.AgentSessionStatus_AGENT_SESSION_STATUS_UNSPECIFIED
+	last := AgentSessionStatusUnspecified
 	seenNonUnspecified := false
 	for {
 		s, err := c.getSession(ctx, sessionID, workspaceID)
@@ -88,24 +86,24 @@ func (c *Client) WaitForAgentIdle(
 			return nil, fmt.Errorf("get session: %w", err)
 		}
 
-		switch s.GetStatus() {
-		case codespacesv1.SessionStatus_SESSION_STATUS_FAILED:
+		switch s.Status {
+		case SessionStatusFailed:
 			return s, fmt.Errorf("session %s entered FAILED state while waiting for agent", sessionID)
-		case codespacesv1.SessionStatus_SESSION_STATUS_ARCHIVED:
+		case SessionStatusArchived:
 			return s, fmt.Errorf("session %s was archived while waiting for agent", sessionID)
 		}
 
-		ag := s.GetAgentSessionStatus()
+		ag := agentStatusOrUnspecified(s.AgentSessionStatus)
 		if ag != last {
 			last = ag
 			if onStatus != nil {
 				onStatus(last)
 			}
 		}
-		if ag != codespacesv1.AgentSessionStatus_AGENT_SESSION_STATUS_UNSPECIFIED {
+		if ag != AgentSessionStatusUnspecified {
 			seenNonUnspecified = true
 		}
-		if seenNonUnspecified && ag == codespacesv1.AgentSessionStatus_AGENT_SESSION_STATUS_IDLE {
+		if seenNonUnspecified && ag == AgentSessionStatusIdle {
 			return s, nil
 		}
 
@@ -124,29 +122,30 @@ func (c *Client) WaitForRunning(
 	ctx context.Context,
 	sessionID, workspaceID string,
 	interval time.Duration,
-	onStatus func(codespacesv1.SessionStatus),
-) (*codespacesv1.Session, error) {
+	onStatus func(SessionStatus),
+) (*Session, error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	var last codespacesv1.SessionStatus = codespacesv1.SessionStatus_SESSION_STATUS_UNSPECIFIED
+	last := SessionStatusUnspecified
 	for {
 		s, err := c.getSession(ctx, sessionID, workspaceID)
 		if err != nil {
 			return nil, fmt.Errorf("get session: %w", err)
 		}
-		if s.GetStatus() != last {
-			last = s.GetStatus()
+		curr := sessionStatusOrUnspecified(s.Status)
+		if curr != last {
+			last = curr
 			if onStatus != nil {
 				onStatus(last)
 			}
 		}
-		switch s.GetStatus() {
-		case codespacesv1.SessionStatus_SESSION_STATUS_RUNNING:
+		switch curr {
+		case SessionStatusRunning:
 			return s, nil
-		case codespacesv1.SessionStatus_SESSION_STATUS_FAILED:
+		case SessionStatusFailed:
 			return s, fmt.Errorf("session %s entered FAILED state", sessionID)
-		case codespacesv1.SessionStatus_SESSION_STATUS_ARCHIVED:
+		case SessionStatusArchived:
 			return s, fmt.Errorf("session %s entered ARCHIVED state", sessionID)
 		}
 
@@ -156,4 +155,24 @@ func (c *Client) WaitForRunning(
 		case <-ticker.C:
 		}
 	}
+}
+
+// protojson with EmitUnpopulated=false omits zero-valued enums entirely, so
+// a freshly-created session may return JSON with no `status` / `agentSessionStatus`
+// field at all. Normalize the empty string to the explicit UNSPECIFIED constant
+// so the wait loops compare cleanly and the onStatus callback prints something
+// meaningful on the first observation.
+
+func sessionStatusOrUnspecified(s SessionStatus) SessionStatus {
+	if s == "" {
+		return SessionStatusUnspecified
+	}
+	return s
+}
+
+func agentStatusOrUnspecified(s AgentSessionStatus) AgentSessionStatus {
+	if s == "" {
+		return AgentSessionStatusUnspecified
+	}
+	return s
 }

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/bitrise-io/ai-qa-agent-cli/internal/codespaces"
-	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -199,11 +198,11 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	}
 	inputs = ensureQAAgentInputs(inputs, createDeviceType, createIOSVersion, createXcodeVersion, createUploadDestination, createWatchTimeout, createWatchPoll)
 
-	req := &codespacesv1.CreateSessionRequest{
+	req := &codespaces.CreateSessionRequest{
 		Name:                    createName,
 		Description:             createDescription,
-		TemplateId:              createTemplate,
-		WorkspaceId:             createWorkspace,
+		TemplateID:              createTemplate,
+		WorkspaceID:             createWorkspace,
 		SessionInputs:           inputs,
 		EnabledFeatureFlagNames: createFeatureFlags,
 		Cluster:                 createCluster,
@@ -227,10 +226,10 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("CreateSession: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "created session %s (status: %s)\n", session.GetId(), session.GetStatus())
+	fmt.Fprintf(os.Stderr, "created session %s (status: %s)\n", session.ID, session.Status)
 
 	if createWait {
-		session, err = client.WaitForRunning(ctx, session.GetId(), createWorkspace, createPollInterval, func(s codespacesv1.SessionStatus) {
+		session, err = client.WaitForRunning(ctx, session.ID, createWorkspace, createPollInterval, func(s codespaces.SessionStatus) {
 			fmt.Fprintf(os.Stderr, "  status: %s\n", s)
 		})
 		if err != nil {
@@ -238,29 +237,29 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	if createUpload != "" && session.GetStatus() == codespacesv1.SessionStatus_SESSION_STATUS_RUNNING {
-		actualPath, err := client.UploadFile(ctx, session.GetId(), createWorkspace, createUpload, createUploadDestination)
+	if createUpload != "" && session.Status == codespaces.SessionStatusRunning {
+		actualPath, err := client.UploadFile(ctx, session.ID, createWorkspace, createUpload, createUploadDestination)
 		if err != nil {
 			return fmt.Errorf("upload %s: %w", createUpload, err)
 		}
 		fmt.Fprintf(os.Stderr, "uploaded %s -> %s\n", createUpload, actualPath)
 	}
 
-	if createOpenRemoteAccess && session.GetStatus() == codespacesv1.SessionStatus_SESSION_STATUS_RUNNING {
-		session, err = client.OpenRemoteAccess(ctx, session.GetId(), createWorkspace)
+	if createOpenRemoteAccess && session.Status == codespaces.SessionStatusRunning {
+		session, err = client.OpenRemoteAccess(ctx, session.ID, createWorkspace)
 		if err != nil {
 			return fmt.Errorf("OpenRemoteAccess: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "ssh: %s (password: %s)\n", session.GetSshAddress(), session.GetSshPassword())
-		fmt.Fprintf(os.Stderr, "vnc: %s (user: %s, password: %s)\n", session.GetVncAddress(), session.GetVncUsername(), session.GetVncPassword())
+		fmt.Fprintf(os.Stderr, "ssh: %s (password: %s)\n", session.SSHAddress, session.SSHPassword)
+		fmt.Fprintf(os.Stderr, "vnc: %s (user: %s, password: %s)\n", session.VNCAddress, session.VNCUsername, session.VNCPassword)
 	}
 
-	fmt.Println(session.GetId())
+	fmt.Println(session.ID)
 	if createUpload != "" {
 		fmt.Fprintf(os.Stderr,
 			"\nWhen the QA run finishes, collect results + stop the VM with:\n"+
 				"  ai-qa-agent-cli session collect %s --workspace %s\n",
-			session.GetId(), createWorkspace)
+			session.ID, createWorkspace)
 	}
 	return nil
 }
@@ -303,16 +302,16 @@ func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string, isDefault bo
 // injectQAPrompt appends the resolved QA prompt as a QA_PROMPT session input.
 // Errors if the caller already supplied QA_PROMPT via --input / --secret-input
 // / --saved-input — the dedicated --qa-prompt flag is the supported entry point.
-func injectQAPrompt(inputs []*codespacesv1.SessionInputValue, prompt string) ([]*codespacesv1.SessionInputValue, error) {
+func injectQAPrompt(inputs []*codespaces.SessionInputValue, prompt string) ([]*codespaces.SessionInputValue, error) {
 	if prompt == "" {
 		return inputs, nil
 	}
 	for _, in := range inputs {
-		if in.GetKey() == qaPromptInputKey {
+		if in.Key == qaPromptInputKey {
 			return nil, fmt.Errorf("%s already supplied via --input/--secret-input/--saved-input; use --qa-prompt only", qaPromptInputKey)
 		}
 	}
-	return append(inputs, &codespacesv1.SessionInputValue{Key: qaPromptInputKey, Value: prompt}), nil
+	return append(inputs, &codespaces.SessionInputValue{Key: qaPromptInputKey, Value: prompt}), nil
 }
 
 // ensureQAAgentInputs forwards the QA Agent template's optional session
@@ -322,13 +321,13 @@ func injectQAPrompt(inputs []*codespacesv1.SessionInputValue, prompt string) ([]
 // are skipped so the template's own defaults apply. Already-supplied inputs
 // (via --input / --secret-input / --saved-input) win.
 func ensureQAAgentInputs(
-	inputs []*codespacesv1.SessionInputValue,
+	inputs []*codespaces.SessionInputValue,
 	deviceType, iosVersion, xcodeVersion, watchDir string,
 	watchTimeout, watchPoll time.Duration,
-) []*codespacesv1.SessionInputValue {
+) []*codespaces.SessionInputValue {
 	have := func(key string) bool {
 		for _, in := range inputs {
-			if in.GetKey() == key {
+			if in.Key == key {
 				return true
 			}
 		}
@@ -338,7 +337,7 @@ func ensureQAAgentInputs(
 		if val == "" || have(key) {
 			return
 		}
-		inputs = append(inputs, &codespacesv1.SessionInputValue{Key: key, Value: val})
+		inputs = append(inputs, &codespaces.SessionInputValue{Key: key, Value: val})
 	}
 	add(deviceTypeInputKey, deviceType)
 	add(iosVersionInputKey, iosVersion)
@@ -353,29 +352,29 @@ func ensureQAAgentInputs(
 	return inputs
 }
 
-func buildSessionInputs(plain, secret, saved []string) ([]*codespacesv1.SessionInputValue, error) {
-	out := make([]*codespacesv1.SessionInputValue, 0, len(plain)+len(secret)+len(saved))
+func buildSessionInputs(plain, secret, saved []string) ([]*codespaces.SessionInputValue, error) {
+	out := make([]*codespaces.SessionInputValue, 0, len(plain)+len(secret)+len(saved))
 
 	for _, kv := range plain {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok {
 			return nil, fmt.Errorf("--input %q: expected key=value", kv)
 		}
-		out = append(out, &codespacesv1.SessionInputValue{Key: k, Value: v})
+		out = append(out, &codespaces.SessionInputValue{Key: k, Value: v})
 	}
 	for _, kv := range secret {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok {
 			return nil, fmt.Errorf("--secret-input %q: expected key=value", kv)
 		}
-		out = append(out, &codespacesv1.SessionInputValue{Key: k, Value: v, IsSecret: true})
+		out = append(out, &codespaces.SessionInputValue{Key: k, Value: v, IsSecret: true})
 	}
 	for _, kv := range saved {
 		k, id, ok := strings.Cut(kv, "=")
 		if !ok {
 			return nil, fmt.Errorf("--saved-input %q: expected key=savedInputID", kv)
 		}
-		out = append(out, &codespacesv1.SessionInputValue{Key: k, SavedInputId: id})
+		out = append(out, &codespaces.SessionInputValue{Key: k, SavedInputID: id})
 	}
 	return out, nil
 }

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/bitrise-io/ai-qa-agent-cli/internal/codespaces"
-	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -83,7 +82,7 @@ func runSessionCollect(cmd *cobra.Command, args []string) error {
 
 	if !collectNoWait {
 		fmt.Fprintln(os.Stderr, "waiting for QA agent to reach IDLE...")
-		_, err := client.WaitForAgentIdle(ctx, sessionID, collectWorkspace, collectPollInterval, func(s codespacesv1.AgentSessionStatus) {
+		_, err := client.WaitForAgentIdle(ctx, sessionID, collectWorkspace, collectPollInterval, func(s codespaces.AgentSessionStatus) {
 			fmt.Fprintf(os.Stderr, "  agent_session_status: %s\n", s)
 		})
 		if err != nil {
@@ -109,7 +108,7 @@ func runSessionCollect(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("stop session: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "  status: %s\n", stopped.GetStatus())
+		fmt.Fprintf(os.Stderr, "  status: %s\n", stopped.Status)
 	}
 
 	fmt.Println(destDir)

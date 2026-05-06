@@ -12,8 +12,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-
-	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 )
 
 // UploadFile ships a local file or directory to the session's VM.
@@ -41,26 +39,26 @@ func (c *Client) UploadFile(
 		return "", fmt.Errorf("build archive: %w", err)
 	}
 
-	startReq := &codespacesv1.SessionStartUploadRequest{
-		SessionId:         sessionID,
-		WorkspaceId:       workspaceID,
+	startReq := &SessionStartUploadRequest{
+		SessionID:         sessionID,
+		WorkspaceID:       workspaceID,
 		DestinationFolder: destFolder,
 	}
-	var startResp codespacesv1.SessionStartUploadResponse
+	var startResp SessionStartUploadResponse
 	startPath := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/start-upload",
 		url.PathEscape(workspaceID), url.PathEscape(sessionID))
 	if err := c.do(ctx, http.MethodPost, startPath, startReq, &startResp); err != nil {
 		return "", fmt.Errorf("SessionStartUpload: %w", err)
 	}
 
-	if err := putToSignedURL(ctx, startResp.GetSignedUrl(), archive); err != nil {
+	if err := putToSignedURL(ctx, startResp.SignedURL, archive); err != nil {
 		return "", fmt.Errorf("upload archive: %w", err)
 	}
 
-	completeReq := &codespacesv1.SessionCompleteUploadRequest{
-		SessionId:         sessionID,
-		WorkspaceId:       workspaceID,
-		UploadId:          startResp.GetUploadId(),
+	completeReq := &SessionCompleteUploadRequest{
+		SessionID:         sessionID,
+		WorkspaceID:       workspaceID,
+		UploadID:          startResp.UploadID,
 		DestinationFolder: destFolder,
 	}
 	completePath := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/complete-upload",
