@@ -23,6 +23,14 @@ const (
 	// has arrived — the watcher inside the template is the only intended
 	// launcher.
 	qaPromptInputKey = "QA_PROMPT"
+
+	// The QA Agent template needs these two as session inputs so warmup.sh
+	// can register the bitrise-dev-environments MCP server with credentials
+	// scoped to the same workspace driving the session. We auto-fill them
+	// from --workspace and BITRISE_PAT respectively when the caller hasn't
+	// already supplied them.
+	bitriseTokenInputKey       = "BITRISE_TOKEN"
+	bitriseWorkspaceIDInputKey = "BITRISE_WORKSPACE_ID"
 )
 
 // defaultQAPrompt is sent when --qa-prompt is omitted. It runs a generic
@@ -133,6 +141,7 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	inputs = ensureBitriseAuthInputs(inputs, pat, createWorkspace)
 
 	req := &codespacesv1.CreateSessionRequest{
 		Name:                    createName,
@@ -246,6 +255,37 @@ func injectQAPrompt(inputs []*codespacesv1.SessionInputValue, prompt string) ([]
 		}
 	}
 	return append(inputs, &codespacesv1.SessionInputValue{Key: qaPromptInputKey, Value: prompt}), nil
+}
+
+// ensureBitriseAuthInputs adds BITRISE_TOKEN and BITRISE_WORKSPACE_ID session
+// inputs unless the caller already supplied them via --input / --secret-input
+// / --saved-input. The QA Agent template's warmup.sh requires both to register
+// the bitrise-dev-environments MCP server inside the VM, scoped to the same
+// workspace driving the session — without auto-injection, callers would have
+// to repeat their CLI auth on every invocation.
+func ensureBitriseAuthInputs(inputs []*codespacesv1.SessionInputValue, pat, workspaceID string) []*codespacesv1.SessionInputValue {
+	have := func(key string) bool {
+		for _, in := range inputs {
+			if in.GetKey() == key {
+				return true
+			}
+		}
+		return false
+	}
+	if !have(bitriseTokenInputKey) {
+		inputs = append(inputs, &codespacesv1.SessionInputValue{
+			Key:      bitriseTokenInputKey,
+			Value:    pat,
+			IsSecret: true,
+		})
+	}
+	if !have(bitriseWorkspaceIDInputKey) {
+		inputs = append(inputs, &codespacesv1.SessionInputValue{
+			Key:   bitriseWorkspaceIDInputKey,
+			Value: workspaceID,
+		})
+	}
+	return inputs
 }
 
 func buildSessionInputs(plain, secret, saved []string) ([]*codespacesv1.SessionInputValue, error) {
