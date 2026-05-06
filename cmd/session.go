@@ -32,14 +32,6 @@ const (
 	// launcher.
 	qaPromptInputKey = "QA_PROMPT"
 
-	// The QA Agent template needs these two as session inputs so warmup.sh
-	// can register the bitrise-dev-environments MCP server with credentials
-	// scoped to the same workspace driving the session. We auto-fill them
-	// from --workspace and BITRISE_PAT respectively when the caller hasn't
-	// already supplied them.
-	bitriseTokenInputKey       = "BITRISE_TOKEN"
-	bitriseWorkspaceIDInputKey = "BITRISE_WORKSPACE_ID"
-
 	// Optional QA Agent template inputs. Each is forwarded as a session
 	// input only when the caller explicitly sets the corresponding flag —
 	// empty values let the template apply its own defaults. QA_WATCH_DIR
@@ -55,22 +47,22 @@ const (
 
 // defaultQAPrompt is sent when --qa-prompt is omitted. It runs a generic
 // smoke test of the uploaded app: install, launch, exercise via the
-// bitrise-dev-environments MCP tools, report. Knowledge it relies on is
-// produced by the QA Agent template's startup.sh and watcher.sh.
+// in-VM qa-agent MCP tools, report. Knowledge it relies on is produced by
+// the QA Agent template's startup.sh and watcher.sh.
 const defaultQAPrompt = `You are an iOS QA tester running inside a Bitrise RDE session.
 
 Environment:
-  /tmp/.qa-agent-info.json   { udid, session_id, workspace_id }
+  /tmp/.qa-agent-info.json   { udid, session_id }
   ~/.qa-agent/upload-path    path to the uploaded app directory
   ~/.qa-agent/results/       PRE-CREATED. Save ALL artefacts here, FLAT. Bitrise's JUnit attachment convention requires attachment files to sit next to junit.xml — do NOT create subdirectories.
 
 Smoke-test the uploaded app:
-  1. Resolve UDID, SESSION_ID, and the upload directory from the files above.
+  1. Resolve UDID and the upload directory from the files above.
   2. Find the .app inside the upload directory. If it is an .ipa, unzip it first; the bundle is at Payload/*.app.
   3. xcrun simctl install $UDID <path-to-.app>
   4. Read CFBundleIdentifier from <.app>/Info.plist.
   5. xcrun simctl launch $UDID <bundle-id>
-  6. Use the bitrise-dev-environments MCP server (screenshot, click, scroll, type) with session_id=$SESSION_ID to drive the simulator: take an initial screenshot, then tap visible primary buttons, scroll on each screen, and walk through any tab bar or menu. Save each screenshot directly into ~/.qa-agent/results/ as screenshot-NN-<short-tag>.png (zero-padded NN, lowercase tag, no spaces).
+  6. Use the qa-agent MCP server (qa_screenshot, qa_click, qa_scroll, qa_type, qa_mouse_drag) to drive the simulator. Always call qa_screenshot first so the server knows the real display resolution; then tap visible primary buttons, scroll on each screen, and walk through any tab bar or menu. Save each screenshot directly into ~/.qa-agent/results/ as screenshot-NN-<short-tag>.png (zero-padded NN, lowercase tag, no spaces).
   7. Stop after about 10 interactions or sooner if you hit a crash, an unexpected alert, or a stuck loading state.
   8. Write results to ~/.qa-agent/results/ (FLAT — no subdirs):
      a. cp ~/.qa-agent/claude.log ~/.qa-agent/results/claude.log so it can be referenced as a JUnit attachment.
@@ -205,7 +197,6 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	inputs = ensureBitriseAuthInputs(inputs, pat, createWorkspace)
 	inputs = ensureQAAgentInputs(inputs, createDeviceType, createIOSVersion, createXcodeVersion, createUploadDestination, createWatchTimeout, createWatchPoll)
 
 	req := &codespacesv1.CreateSessionRequest{
@@ -322,37 +313,6 @@ func injectQAPrompt(inputs []*codespacesv1.SessionInputValue, prompt string) ([]
 		}
 	}
 	return append(inputs, &codespacesv1.SessionInputValue{Key: qaPromptInputKey, Value: prompt}), nil
-}
-
-// ensureBitriseAuthInputs adds BITRISE_TOKEN and BITRISE_WORKSPACE_ID session
-// inputs unless the caller already supplied them via --input / --secret-input
-// / --saved-input. The QA Agent template's warmup.sh requires both to register
-// the bitrise-dev-environments MCP server inside the VM, scoped to the same
-// workspace driving the session — without auto-injection, callers would have
-// to repeat their CLI auth on every invocation.
-func ensureBitriseAuthInputs(inputs []*codespacesv1.SessionInputValue, pat, workspaceID string) []*codespacesv1.SessionInputValue {
-	have := func(key string) bool {
-		for _, in := range inputs {
-			if in.GetKey() == key {
-				return true
-			}
-		}
-		return false
-	}
-	if !have(bitriseTokenInputKey) {
-		inputs = append(inputs, &codespacesv1.SessionInputValue{
-			Key:      bitriseTokenInputKey,
-			Value:    pat,
-			IsSecret: true,
-		})
-	}
-	if !have(bitriseWorkspaceIDInputKey) {
-		inputs = append(inputs, &codespacesv1.SessionInputValue{
-			Key:   bitriseWorkspaceIDInputKey,
-			Value: workspaceID,
-		})
-	}
-	return inputs
 }
 
 // ensureQAAgentInputs forwards the QA Agent template's optional session

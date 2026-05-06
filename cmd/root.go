@@ -38,4 +38,5 @@ func init() {
 	rootCmd.PersistentFlags().DurationVar(&flagTimeout, "timeout", 15*time.Minute, "Overall timeout for the command (covers create + wait)")
 
 	rootCmd.AddCommand(sessionCmd)
+	rootCmd.AddCommand(mcpCmd)
 }
