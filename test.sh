@@ -1,10 +1,5 @@
 #!/bin/zsh
 
-# Talks to the production codespaces REST API by default. For local dev,
-# port-forward the API HTTP port and point --endpoint at it:
-#   kubectl --context ip-prod -n internal-apps port-forward deploy/codespaces-api 8081:8080
-#   ./test.sh --endpoint http://localhost:8081
-
 # requires BITRISE_PAT
 
 GOOS=darwin GOARCH=arm64 go build -o /tmp/hello-rde ./examples/hello
