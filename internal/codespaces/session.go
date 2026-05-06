@@ -59,7 +59,7 @@ func (c *Client) StopSession(ctx context.Context, sessionID, workspaceID string)
 // launched, signalled by agent_session_status leaving UNSPECIFIED. Our
 // watcher posts AGENT_WORKING immediately after `tmux send-keys "claude …"`,
 // so this is the cleanest "Claude is alive" rendezvous: returns when the
-// CLI can hand the session back to the user (e.g. `tmux attach -t qa-agent`
+// CLI can hand the session back to the user (e.g. `tmux attach -t claude-auto`
 // will show a live conversation).
 //
 // Errors out if the session itself enters FAILED or ARCHIVED, or if ctx is

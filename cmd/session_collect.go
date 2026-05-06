@@ -37,7 +37,7 @@ the session.
 
 The three steps are on by default. Use --no-wait to skip polling and
 download immediately. Use --no-stop to keep the VM running after collection
-(handy for debugging via tmux attach -t qa-agent).`,
+(handy for debugging via tmux attach -t claude-auto).`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSessionCollect,
 }

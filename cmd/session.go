@@ -253,7 +253,7 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 			}); err != nil {
 				return fmt.Errorf("waiting for agent launch: %w", err)
 			}
-			logf("Claude launched; tmux pane 'qa-agent' is now live (tmux attach -t qa-agent over SSH)")
+			logf("Claude launched; the in-VM tmux session 'claude-auto' is live (the codespaces UI's 'open Claude' button picks it up; over SSH use `tmux attach -t claude-auto`)")
 		}
 	}
 
