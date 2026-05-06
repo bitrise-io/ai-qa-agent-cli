@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,12 @@ import (
 	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 	"github.com/spf13/cobra"
 )
+
+// xcodeVersionRE matches Apple-style Xcode versions: digits with up to two
+// dot-separated components (e.g. 26, 26.3, 16.4.1). The template resolves
+// /Applications/Xcode-<version>.app, so anything outside this shape is
+// guaranteed to fail on the VM — better to fail fast on the client.
+var xcodeVersionRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,2}$`)
 
 const (
 	remotePathPlaceholder = "{{REMOTE_PATH}}"
@@ -155,7 +162,7 @@ func init() {
 		"Sent to the template as "+qaWatchDirInputKey+" so the watcher trigger and the upload destination stay in sync.")
 	f.StringVar(&createDeviceType, "device-type", "", "DEVICE_TYPE session input. Simulator device passed to xcrun simctl create. Template default: \"iPhone 15\".")
 	f.StringVar(&createIOSVersion, "ios-version", "", "IOS_VERSION session input. iOS runtime for the simulator. Template default: highest available.")
-	f.StringVar(&createXcodeVersion, "xcode-version", "26.3", "XCODE_VERSION session input. Xcode version selected via DEVELOPER_DIR on the VM (e.g. \"26.3\" → /Applications/Xcode-26.3.app).")
+	f.StringVar(&createXcodeVersion, "xcode-version", "26.5.0", "XCODE_VERSION session input. Xcode version selected via DEVELOPER_DIR on the VM (e.g. \"26.3\" → /Applications/Xcode-26.3.app).")
 	f.DurationVar(&createWatchTimeout, "watch-timeout", 0, "QA_WATCH_TIMEOUT_SEC session input. How long the in-VM watcher waits for the upload before giving up. Template default: 30m.")
 	f.DurationVar(&createWatchPoll, "watch-poll", 0, "QA_WATCH_POLL_SEC session input. Watcher poll interval. Template default: 2s.")
 	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", 60, "Minutes before auto-termination (0 disables; -1 leaves backend default). Defaults to 60 so a crashed CLI eventually frees the VM; pass 0 explicitly if you want sessions that don't auto-terminate.")
@@ -173,6 +180,10 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	pat := os.Getenv(envPAT)
 	if pat == "" {
 		return fmt.Errorf("%s not set", envPAT)
+	}
+
+	if createXcodeVersion != "" && !xcodeVersionRE.MatchString(createXcodeVersion) {
+		return fmt.Errorf("--xcode-version %q: must be MAJOR[.MINOR[.PATCH]] digits only (e.g. 26.3 or 16.4.1)", createXcodeVersion)
 	}
 
 	rawPrompt := createQAPrompt
