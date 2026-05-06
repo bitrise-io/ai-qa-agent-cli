@@ -55,6 +55,54 @@ func (c *Client) StopSession(ctx context.Context, sessionID, workspaceID string)
 	return resp.Session, nil
 }
 
+// WaitForAgentLaunch polls GetSession until the in-VM agent has been
+// launched, signalled by agent_session_status leaving UNSPECIFIED. Our
+// watcher posts AGENT_WORKING immediately after `tmux send-keys "claude …"`,
+// so this is the cleanest "Claude is alive" rendezvous: returns when the
+// CLI can hand the session back to the user (e.g. `tmux attach -t qa-agent`
+// will show a live conversation).
+//
+// Errors out if the session itself enters FAILED or ARCHIVED, or if ctx is
+// cancelled.
+func (c *Client) WaitForAgentLaunch(
+	ctx context.Context,
+	sessionID, workspaceID string,
+	interval time.Duration,
+	onStatus func(AgentSessionStatus),
+) (*Session, error) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	last := AgentSessionStatusUnspecified
+	for {
+		s, err := c.getSession(ctx, sessionID, workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("get session: %w", err)
+		}
+		switch s.Status {
+		case SessionStatusFailed:
+			return s, fmt.Errorf("session %s entered FAILED state while waiting for agent launch", sessionID)
+		case SessionStatusArchived:
+			return s, fmt.Errorf("session %s was archived while waiting for agent launch", sessionID)
+		}
+		ag := agentStatusOrUnspecified(s.AgentSessionStatus)
+		if ag != last {
+			last = ag
+			if onStatus != nil {
+				onStatus(last)
+			}
+		}
+		if ag != AgentSessionStatusUnspecified {
+			return s, nil
+		}
+		select {
+		case <-ctx.Done():
+			return s, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 // WaitForAgentIdle polls GetSession until the in-VM agent reaches IDLE (i.e.
 // Claude has fired its Stop hook and the codespaces backend has flipped
 // agent_session_status to AGENT_SESSION_STATUS_IDLE). Returns on the first

@@ -123,6 +123,7 @@ var (
 	createXcodeVersion         string
 	createWatchTimeout         time.Duration
 	createWatchPoll            time.Duration
+	createWaitForAgent         bool
 )
 
 var sessionCreateCmd = &cobra.Command{
@@ -159,7 +160,8 @@ func init() {
 	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", 60, "Minutes before auto-termination (0 disables; -1 leaves backend default). Defaults to 60 so a crashed CLI eventually frees the VM; pass 0 explicitly if you want sessions that don't auto-terminate.")
 	f.BoolVar(&createMapSavedInputs, "map-saved-inputs", true, "Auto-fill template session inputs from caller's saved inputs")
 	f.BoolVar(&createWait, "wait", true, "Poll until session reaches RUNNING")
-	f.DurationVar(&createPollInterval, "poll-interval", 5*time.Second, "Status poll interval when --wait is set")
+	f.BoolVar(&createWaitForAgent, "wait-for-agent", true, "After --upload, also wait until the in-VM agent (Claude) has been launched (agent_session_status leaves UNSPECIFIED). Only meaningful when --upload is set.")
+	f.DurationVar(&createPollInterval, "poll-interval", 5*time.Second, "Status poll interval for --wait and --wait-for-agent")
 	f.BoolVar(&createOpenRemoteAccess, "open-remote-access", false, "After RUNNING, call OpenRemoteAccess and print SSH/VNC details")
 
 	_ = sessionCreateCmd.MarkFlagRequired("workspace")
@@ -243,6 +245,16 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("upload %s: %w", createUpload, err)
 		}
 		logf("uploaded %s -> %s", createUpload, actualPath)
+
+		if createWaitForAgent {
+			logf("waiting for the in-VM watcher to launch Claude (sim-create + boot run in parallel; can take a few minutes on a non-default Xcode)...")
+			if _, err := client.WaitForAgentLaunch(ctx, session.ID, createWorkspace, createPollInterval, func(s codespaces.AgentSessionStatus) {
+				logf("  agent_session_status: %s", s)
+			}); err != nil {
+				return fmt.Errorf("waiting for agent launch: %w", err)
+			}
+			logf("Claude launched; tmux pane 'qa-agent' is now live (tmux attach -t qa-agent over SSH)")
+		}
 	}
 
 	if createOpenRemoteAccess && session.Status == codespaces.SessionStatusRunning {

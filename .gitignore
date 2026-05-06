@@ -33,3 +33,6 @@ go.work.sum
 
 # CLI binary built by `go build` at the repo root
 /ai-qa-agent-cli
+
+# `session collect` default output dir
+/qa-agent-results/
