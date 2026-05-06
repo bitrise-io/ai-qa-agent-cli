@@ -16,13 +16,13 @@ import (
 	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 )
 
-// UploadFile ships a single local file to the session's VM.
-// The file is packed into a gzipped tar containing one entry (mode 0755) and
-// uploaded via the backend's signed PUT URL flow. Returns the absolute remote
-// path the file lands at after extraction.
+// UploadFile ships a local file or directory to the session's VM.
+// The path is packed into a gzipped tar (preserving file modes and symlinks)
+// and uploaded via the backend's signed PUT URL flow. Returns the absolute
+// remote path it lands at after extraction.
 //
-// destFolder must be an absolute path; the server enforces this anyway, but we
-// validate locally for a faster failure.
+// destFolder must be an absolute path; the server enforces this anyway, but
+// we validate locally for a faster failure.
 func (c *Client) UploadFile(
 	ctx context.Context,
 	sessionID, workspaceID string,
@@ -32,18 +32,11 @@ func (c *Client) UploadFile(
 		return "", fmt.Errorf("destination folder must be absolute, got %q", destFolder)
 	}
 
-	f, err := os.Open(localPath)
-	if err != nil {
-		return "", fmt.Errorf("open %s: %w", localPath, err)
-	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
+	if _, err := os.Stat(localPath); err != nil {
 		return "", fmt.Errorf("stat %s: %w", localPath, err)
 	}
 
-	archive, err := buildTarGz(filepath.Base(localPath), stat.Size(), f)
+	archive, err := buildTarGzPath(localPath)
 	if err != nil {
 		return "", fmt.Errorf("build archive: %w", err)
 	}
@@ -79,22 +72,61 @@ func (c *Client) UploadFile(
 	return path.Join(destFolder, filepath.Base(localPath)), nil
 }
 
-func buildTarGz(name string, size int64, body io.Reader) ([]byte, error) {
+// buildTarGzPath packs localPath into a gzipped tar. For a file, the archive
+// contains one regular entry named filepath.Base(localPath). For a directory,
+// every entry under it is packed with names relative to the directory's parent
+// — so after `tar -xzf` into <dest>, the contents land at <dest>/<basename>/...
+func buildTarGzPath(localPath string) ([]byte, error) {
+	clean := filepath.Clean(localPath)
+	parent := filepath.Dir(clean)
+
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	if err := tw.WriteHeader(&tar.Header{
-		Name:     name,
-		Mode:     0o755,
-		Size:     size,
-		Typeflag: tar.TypeReg,
-	}); err != nil {
-		return nil, err
+	walkErr := filepath.Walk(clean, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		var link string
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err = os.Readlink(p)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", p, err)
+			}
+		}
+		hdr, err := tar.FileInfoHeader(info, link)
+		if err != nil {
+			return fmt.Errorf("tar header %s: %w", p, err)
+		}
+		rel, err := filepath.Rel(parent, p)
+		if err != nil {
+			return fmt.Errorf("rel %s: %w", p, err)
+		}
+		hdr.Name = filepath.ToSlash(rel)
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			return fmt.Errorf("write header %s: %w", p, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", p, err)
+		}
+		_, copyErr := io.Copy(tw, f)
+		f.Close()
+		if copyErr != nil {
+			return fmt.Errorf("copy %s: %w", p, copyErr)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
 	}
-	if _, err := io.Copy(tw, body); err != nil {
-		return nil, err
-	}
+
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}

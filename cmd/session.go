@@ -261,12 +261,8 @@ func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string, isDefault bo
 		return "", "", fmt.Errorf("--upload-destination must be absolute, got %q", uploadDest)
 	}
 
-	stat, err := os.Stat(uploadLocal)
-	if err != nil {
+	if _, err := os.Stat(uploadLocal); err != nil {
 		return "", "", fmt.Errorf("--upload %s: %w", uploadLocal, err)
-	}
-	if stat.IsDir() {
-		return "", "", fmt.Errorf("--upload %s: must be a file, not a directory", uploadLocal)
 	}
 
 	remote := path.Join(uploadDest, filepath.Base(uploadLocal))
