@@ -220,7 +220,6 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("CreateSession: %w", err)
 	}
 	logf("created session %s (status: %s)", session.ID, session.Status)
-	logf("UI: %s/%s#/sessions/%s", strings.TrimRight(flagUIBaseURL, "/"), createWorkspace, session.ID)
 
 	if createWait {
 		session, err = client.WaitForRunning(ctx, session.ID, createWorkspace, createPollInterval, func(s codespaces.SessionStatus) {
@@ -228,6 +227,9 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		})
 		if err != nil {
 			return err
+		}
+		if session.Status == codespaces.SessionStatusRunning {
+			logf("UI: %s/%s#/sessions/%s", strings.TrimRight(flagUIBaseURL, "/"), createWorkspace, session.ID)
 		}
 	}
 
