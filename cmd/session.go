@@ -23,13 +23,6 @@ var xcodeVersionRE = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,2}$`)
 
 const (
 	remotePathPlaceholder = "{{REMOTE_PATH}}"
-	// qaPromptInputKey is the session input the QA Agent template's watcher
-	// reads to launch Claude. We do NOT set CreateSessionRequest.AiPrompt
-	// because that would trigger the codespaces backend's claudeAIAutoStart,
-	// which would start a second Claude session at warmup before the upload
-	// has arrived — the watcher inside the template is the only intended
-	// launcher.
-	qaPromptInputKey = "QA_PROMPT"
 
 	// Optional QA Agent template inputs. Each is forwarded as a session
 	// input only when the caller explicitly sets the corresponding flag —
@@ -147,9 +140,8 @@ func init() {
 	f.StringArrayVar(&createSavedInputs, "saved-input", nil, "Saved input reference as key=savedInputID (repeatable)")
 	f.StringArrayVar(&createFeatureFlags, "feature-flag", nil, "Feature flag name to enable (repeatable)")
 	f.StringVar(&createCluster, "cluster", "", "Target cluster name (only required when image+machine-type matches multiple clusters)")
-	f.StringVar(&createQAPrompt, "qa-prompt", "", "QA Agent prompt. Sent to the template as the "+qaPromptInputKey+" session input. "+
+	f.StringVar(&createQAPrompt, "qa-prompt", "", "QA Agent prompt. Sent on the session's ai_prompt field, which the codespaces backend exports as $AI_PROMPT to the inner script. "+
 		"Any "+remotePathPlaceholder+" is substituted with the remote path of --upload before submission. "+
-		"The in-VM watcher launches Claude with this prompt once the --upload directory is populated and size-stable. "+
 		"When omitted, a built-in smoke-test prompt is used (install + launch the uploaded app and exercise its UI).")
 	f.StringVar(&createUpload, "upload", "", "Local file to upload to the session after it reaches RUNNING")
 	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into. "+
@@ -196,10 +188,6 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	inputs, err = injectQAPrompt(inputs, qaPrompt)
-	if err != nil {
-		return err
-	}
 	inputs = ensureQAAgentInputs(inputs, createDeviceType, createIOSVersion, createXcodeVersion, createUploadDestination, createWatchTimeout, createWatchPoll)
 
 	req := &codespaces.CreateSessionRequest{
@@ -210,6 +198,7 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		SessionInputs:           inputs,
 		EnabledFeatureFlagNames: createFeatureFlags,
 		Cluster:                 createCluster,
+		AiPrompt:                qaPrompt,
 		MapSavedToSessionInputs: createMapSavedInputs,
 	}
 	if createAutoTerminateMinutes >= 0 {
@@ -309,21 +298,6 @@ func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string, isDefault bo
 		logf("warning: --qa-prompt does not reference %s; ensure the prompt knows the file's path (%s)", remotePathPlaceholder, remote)
 	}
 	return prompt, remote, nil
-}
-
-// injectQAPrompt appends the resolved QA prompt as a QA_PROMPT session input.
-// Errors if the caller already supplied QA_PROMPT via --input / --secret-input
-// / --saved-input — the dedicated --qa-prompt flag is the supported entry point.
-func injectQAPrompt(inputs []*codespaces.SessionInputValue, prompt string) ([]*codespaces.SessionInputValue, error) {
-	if prompt == "" {
-		return inputs, nil
-	}
-	for _, in := range inputs {
-		if in.Key == qaPromptInputKey {
-			return nil, fmt.Errorf("%s already supplied via --input/--secret-input/--saved-input; use --qa-prompt only", qaPromptInputKey)
-		}
-	}
-	return append(inputs, &codespaces.SessionInputValue{Key: qaPromptInputKey, Value: prompt}), nil
 }
 
 // ensureQAAgentInputs forwards the QA Agent template's optional session

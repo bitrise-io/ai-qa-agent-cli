@@ -55,10 +55,16 @@ type SessionInputValue struct {
 	SavedInputID string `json:"savedInputId,omitempty"`
 }
 
-// CreateSessionRequest mirrors `codespaces.v1.CreateSessionRequest`. We only
-// model the fields the CLI sets — fields we never populate (e.g. ai_prompt,
-// which would trigger the backend's claudeAIAutoStart we deliberately bypass)
-// are intentionally omitted.
+// CreateSessionRequest mirrors `codespaces.v1.CreateSessionRequest`. We
+// model only the fields the CLI sets.
+//
+// AiPrompt is set so the codespaces backend exports AI_PROMPT to the inner
+// script (which our launcher reads) AND so the codespaces UI's auto-attach
+// probe (TerminalCard.tsx, gated on session.aiPrompt) renames our
+// claude-auto tmux session on first attach. The backend's claudeAIAutoStart
+// also fires on the same signal and creates a competing claude-auto with
+// plain `claude` — our launcher kills + recreates the session with the
+// yolo flag, so the brief overlap is harmless.
 type CreateSessionRequest struct {
 	Name                    string               `json:"name,omitempty"`
 	Description             string               `json:"description,omitempty"`
@@ -67,6 +73,7 @@ type CreateSessionRequest struct {
 	SessionInputs           []*SessionInputValue `json:"sessionInputs,omitempty"`
 	EnabledFeatureFlagNames []string             `json:"enabledFeatureFlagNames,omitempty"`
 	Cluster                 string               `json:"cluster,omitempty"`
+	AiPrompt                string               `json:"aiPrompt,omitempty"`
 	// AutoTerminateMinutes is proto-optional; a *int32 lets us send 0
 	// explicitly (disable auto-terminate) versus omit the field entirely
 	// (use the backend's default).
