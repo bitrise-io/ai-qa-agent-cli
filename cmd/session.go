@@ -42,6 +42,7 @@ const defaultQAPrompt = `You are an iOS QA tester running inside a Bitrise RDE s
 Environment:
   /tmp/.qa-agent-info.json   { udid, session_id, workspace_id }
   ~/.qa-agent/upload-path    path to the uploaded app directory
+  ~/.qa-agent/results/       PRE-CREATED. Save ALL artefacts here, FLAT. Bitrise's JUnit attachment convention requires attachment files to sit next to junit.xml — do NOT create subdirectories.
 
 Smoke-test the uploaded app:
   1. Resolve UDID, SESSION_ID, and the upload directory from the files above.
@@ -49,9 +50,38 @@ Smoke-test the uploaded app:
   3. xcrun simctl install $UDID <path-to-.app>
   4. Read CFBundleIdentifier from <.app>/Info.plist.
   5. xcrun simctl launch $UDID <bundle-id>
-  6. Use the bitrise-dev-environments MCP server (screenshot, click, scroll, type) with session_id=$SESSION_ID to drive the simulator: take an initial screenshot, then tap visible primary buttons, scroll on each screen, and walk through any tab bar or menu. Screenshot after each interaction.
+  6. Use the bitrise-dev-environments MCP server (screenshot, click, scroll, type) with session_id=$SESSION_ID to drive the simulator: take an initial screenshot, then tap visible primary buttons, scroll on each screen, and walk through any tab bar or menu. Save each screenshot directly into ~/.qa-agent/results/ as screenshot-NN-<short-tag>.png (zero-padded NN, lowercase tag, no spaces).
   7. Stop after about 10 interactions or sooner if you hit a crash, an unexpected alert, or a stuck loading state.
-  8. Report: did the app launch, which screens you reached, any anomalies, and overall PASS / FAIL.
+  8. Write results to ~/.qa-agent/results/ (FLAT — no subdirs):
+     a. cp ~/.qa-agent/claude.log ~/.qa-agent/results/claude.log so it can be referenced as a JUnit attachment.
+     b. summary.md — short prose: launched yes/no, screens reached, anomalies, overall PASS or FAIL, list of attached screenshots.
+     c. junit.xml — Surefire-style JUnit XML with <testsuite name="QA Agent"> containing AT LEAST these <testcase> elements:
+        - app_launch (failure if simctl install or launch failed)
+        - screen_navigation (failure if you could not get past the first screen)
+        - no_crashes (failure if you observed a crash, unexpected alert, or stuck loading state)
+        Add more <testcase> elements per major feature you exercised (e.g. login_flow, cart_checkout). For every <testcase>, include a <properties> block listing the screenshots and (on failure) claude.log as Bitrise attachments:
+
+          <testcase name="app_launch" classname="QAAgent" time="3.2">
+            <properties>
+              <property name="attachment_1" value="screenshot-01-launch.png" />
+            </properties>
+          </testcase>
+
+        - The property name MUST be attachment_<N> with N a 1-based ordered index per testcase.
+        - The value MUST be a bare filename (no path) of a file you wrote into ~/.qa-agent/results/.
+        - Bitrise accepts these extensions for attachments: .jpg .jpeg .png .txt .log .mp4 .webm .ogg.
+        - On failure, add a <failure message="..." type="..."><![CDATA[ details ]]></failure> element inside the <testcase> AND attach claude.log:
+
+          <testcase name="no_crashes" classname="QAAgent" time="42.0">
+            <failure message="Login screen froze" type="StuckLoading"><![CDATA[Spinner remained 30s, no transition. See attachment_2.]]></failure>
+            <properties>
+              <property name="attachment_1" value="screenshot-04-frozen-login.png" />
+              <property name="attachment_2" value="claude.log" />
+            </properties>
+          </testcase>
+
+        Make junit.xml well-formed XML (declaration optional, but balance every tag). Do not point an attachment at a file you did not write.
+  9. Exit when finished.
 `
 
 var sessionCmd = &cobra.Command{
@@ -105,7 +135,7 @@ func init() {
 	f.StringVar(&createUpload, "upload", "", "Local file to upload to the session after it reaches RUNNING")
 	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into. "+
 		"Must match the QA Agent template's QA_WATCH_DIR (default /tmp/bitrise-ai-qa-agent), since that directory becoming non-empty is the watcher's trigger.")
-	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", -1, "Minutes before auto-termination (0 disables; -1 leaves backend default)")
+	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", 60, "Minutes before auto-termination (0 disables; -1 leaves backend default). Defaults to 60 so a crashed CLI eventually frees the VM; pass 0 explicitly if you want sessions that don't auto-terminate.")
 	f.BoolVar(&createMapSavedInputs, "map-saved-inputs", true, "Auto-fill template session inputs from caller's saved inputs")
 	f.BoolVar(&createWait, "wait", true, "Poll until session reaches RUNNING")
 	f.DurationVar(&createPollInterval, "poll-interval", 5*time.Second, "Status poll interval when --wait is set")
@@ -200,6 +230,12 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	fmt.Println(session.GetId())
+	if createUpload != "" {
+		fmt.Fprintf(os.Stderr,
+			"\nWhen the QA run finishes, collect results + stop the VM with:\n"+
+				"  ai-qa-agent-cli session collect %s --workspace %s\n",
+			session.GetId(), createWorkspace)
+	}
 	return nil
 }
 
