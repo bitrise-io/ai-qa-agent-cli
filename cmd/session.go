@@ -25,6 +25,27 @@ const (
 	qaPromptInputKey = "QA_PROMPT"
 )
 
+// defaultQAPrompt is sent when --qa-prompt is omitted. It runs a generic
+// smoke test of the uploaded app: install, launch, exercise via the
+// bitrise-dev-environments MCP tools, report. Knowledge it relies on is
+// produced by the QA Agent template's startup.sh and watcher.sh.
+const defaultQAPrompt = `You are an iOS QA tester running inside a Bitrise RDE session.
+
+Environment:
+  /tmp/.qa-agent-info.json   { udid, session_id, workspace_id }
+  ~/.qa-agent/upload-path    path to the uploaded app directory
+
+Smoke-test the uploaded app:
+  1. Resolve UDID, SESSION_ID, and the upload directory from the files above.
+  2. Find the .app inside the upload directory. If it is an .ipa, unzip it first; the bundle is at Payload/*.app.
+  3. xcrun simctl install $UDID <path-to-.app>
+  4. Read CFBundleIdentifier from <.app>/Info.plist.
+  5. xcrun simctl launch $UDID <bundle-id>
+  6. Use the bitrise-dev-environments MCP server (screenshot, click, scroll, type) with session_id=$SESSION_ID to drive the simulator: take an initial screenshot, then tap visible primary buttons, scroll on each screen, and walk through any tab bar or menu. Screenshot after each interaction.
+  7. Stop after about 10 interactions or sooner if you hit a crash, an unexpected alert, or a stuck loading state.
+  8. Report: did the app launch, which screens you reached, any anomalies, and overall PASS / FAIL.
+`
+
 var sessionCmd = &cobra.Command{
 	Use:   "session",
 	Short: "Manage RDE sessions",
@@ -71,7 +92,8 @@ func init() {
 	f.StringVar(&createCluster, "cluster", "", "Target cluster name (only required when image+machine-type matches multiple clusters)")
 	f.StringVar(&createQAPrompt, "qa-prompt", "", "QA Agent prompt. Sent to the template as the "+qaPromptInputKey+" session input. "+
 		"Any "+remotePathPlaceholder+" is substituted with the remote path of --upload before submission. "+
-		"The in-VM watcher launches Claude with this prompt once the --upload directory is populated and size-stable.")
+		"The in-VM watcher launches Claude with this prompt once the --upload directory is populated and size-stable. "+
+		"When omitted, a built-in smoke-test prompt is used (install + launch the uploaded app and exercise its UI).")
 	f.StringVar(&createUpload, "upload", "", "Local file to upload to the session after it reaches RUNNING")
 	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into. "+
 		"Must match the QA Agent template's QA_WATCH_DIR (default /tmp/bitrise-ai-qa-agent), since that directory becoming non-empty is the watcher's trigger.")
@@ -92,7 +114,13 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("%s not set", envPAT)
 	}
 
-	qaPrompt, _, err := resolveUploadAndPrompt(createUpload, createUploadDestination, createQAPrompt)
+	rawPrompt := createQAPrompt
+	usingDefaultPrompt := rawPrompt == ""
+	if usingDefaultPrompt {
+		rawPrompt = defaultQAPrompt
+	}
+
+	qaPrompt, _, err := resolveUploadAndPrompt(createUpload, createUploadDestination, rawPrompt, usingDefaultPrompt)
 	if err != nil {
 		return err
 	}
@@ -169,7 +197,12 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 // resolveUploadAndPrompt validates the upload flags against the prompt placeholder
 // and returns the (possibly substituted) prompt plus the resolved remote path.
 // remotePath is empty when --upload is not set.
-func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string) (string, string, error) {
+//
+// isDefault tells us the prompt came from defaultQAPrompt (no user input). The
+// default deliberately resolves the upload path at runtime via
+// `cat ~/.qa-agent/upload-path`, so the "doesn't reference REMOTE_PATH" warning
+// is suppressed for it.
+func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string, isDefault bool) (string, string, error) {
 	hasPlaceholder := strings.Contains(prompt, remotePathPlaceholder)
 
 	if uploadLocal == "" {
@@ -194,7 +227,7 @@ func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string) (string, str
 	remote := path.Join(uploadDest, filepath.Base(uploadLocal))
 	if hasPlaceholder {
 		prompt = strings.ReplaceAll(prompt, remotePathPlaceholder, remote)
-	} else if prompt != "" {
+	} else if !isDefault && prompt != "" {
 		fmt.Fprintf(os.Stderr, "warning: --qa-prompt does not reference %s; ensure the prompt knows the file's path (%s)\n", remotePathPlaceholder, remote)
 	}
 	return prompt, remote, nil
