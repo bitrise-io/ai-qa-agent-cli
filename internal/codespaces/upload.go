@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -47,12 +48,15 @@ func (c *Client) UploadFile(
 		return "", fmt.Errorf("build archive: %w", err)
 	}
 
-	startResp, err := c.Service.SessionStartUpload(ctx, &codespacesv1.SessionStartUploadRequest{
+	startReq := &codespacesv1.SessionStartUploadRequest{
 		SessionId:         sessionID,
 		WorkspaceId:       workspaceID,
 		DestinationFolder: destFolder,
-	})
-	if err != nil {
+	}
+	var startResp codespacesv1.SessionStartUploadResponse
+	startPath := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/start-upload",
+		url.PathEscape(workspaceID), url.PathEscape(sessionID))
+	if err := c.do(ctx, http.MethodPost, startPath, startReq, &startResp); err != nil {
 		return "", fmt.Errorf("SessionStartUpload: %w", err)
 	}
 
@@ -60,12 +64,15 @@ func (c *Client) UploadFile(
 		return "", fmt.Errorf("upload archive: %w", err)
 	}
 
-	if _, err := c.Service.SessionCompleteUpload(ctx, &codespacesv1.SessionCompleteUploadRequest{
+	completeReq := &codespacesv1.SessionCompleteUploadRequest{
 		SessionId:         sessionID,
 		WorkspaceId:       workspaceID,
 		UploadId:          startResp.GetUploadId(),
 		DestinationFolder: destFolder,
-	}); err != nil {
+	}
+	completePath := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/complete-upload",
+		url.PathEscape(workspaceID), url.PathEscape(sessionID))
+	if err := c.do(ctx, http.MethodPost, completePath, completeReq, nil); err != nil {
 		return "", fmt.Errorf("SessionCompleteUpload: %w", err)
 	}
 

@@ -8,14 +8,13 @@ import (
 )
 
 const (
-	defaultEndpoint = "codespaces-api.services.bitrise.io:443"
-	envEndpoint     = "BITRISE_CODESPACES_GRPC_ENDPOINT"
+	defaultEndpoint = "https://codespaces-api.services.bitrise.io"
+	envEndpoint     = "BITRISE_CODESPACES_API_BASE_URL"
 	envPAT          = "BITRISE_PAT"
 )
 
 var (
 	flagEndpoint string
-	flagInsecure bool
 	flagTimeout  time.Duration
 )
 
@@ -35,8 +34,7 @@ func init() {
 	if v := os.Getenv(envEndpoint); v != "" {
 		endpointDefault = v
 	}
-	rootCmd.PersistentFlags().StringVar(&flagEndpoint, "endpoint", endpointDefault, "Codespaces gRPC endpoint (host:port). Env: "+envEndpoint)
-	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure", false, "Disable TLS (for local backend)")
+	rootCmd.PersistentFlags().StringVar(&flagEndpoint, "endpoint", endpointDefault, "Codespaces REST API base URL (scheme://host[:port]). For local dev use http://localhost:8081. Env: "+envEndpoint)
 	rootCmd.PersistentFlags().DurationVar(&flagTimeout, "timeout", 15*time.Minute, "Overall timeout for the command (covers create + wait)")
 
 	rootCmd.AddCommand(sessionCmd)

@@ -3,33 +3,50 @@ package codespaces
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"time"
 
 	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
 )
 
 func (c *Client) CreateSession(ctx context.Context, req *codespacesv1.CreateSessionRequest) (*codespacesv1.Session, error) {
-	resp, err := c.Service.CreateSession(ctx, req)
-	if err != nil {
+	if req.GetWorkspaceId() == "" {
+		return nil, fmt.Errorf("workspace_id is required")
+	}
+	var resp codespacesv1.CreateSessionResponse
+	p := fmt.Sprintf("/v1/workspaces/%s/sessions", url.PathEscape(req.GetWorkspaceId()))
+	if err := c.do(ctx, http.MethodPost, p, req, &resp); err != nil {
+		return nil, err
+	}
+	return resp.GetSession(), nil
+}
+
+func (c *Client) getSession(ctx context.Context, sessionID, workspaceID string) (*codespacesv1.Session, error) {
+	var resp codespacesv1.GetSessionResponse
+	p := fmt.Sprintf("/v1/workspaces/%s/sessions/%s", url.PathEscape(workspaceID), url.PathEscape(sessionID))
+	if err := c.do(ctx, http.MethodGet, p, nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp.GetSession(), nil
 }
 
 func (c *Client) OpenRemoteAccess(ctx context.Context, sessionID, workspaceID string) (*codespacesv1.Session, error) {
-	resp, err := c.Service.OpenRemoteAccess(ctx, &codespacesv1.OpenRemoteAccessRequest{
+	var resp codespacesv1.OpenRemoteAccessResponse
+	body := &codespacesv1.OpenRemoteAccessRequest{
 		SessionId:   sessionID,
 		WorkspaceId: workspaceID,
-	})
-	if err != nil {
+	}
+	p := fmt.Sprintf("/v1/workspaces/%s/sessions/%s/open-remote-access", url.PathEscape(workspaceID), url.PathEscape(sessionID))
+	if err := c.do(ctx, http.MethodPost, p, body, &resp); err != nil {
 		return nil, err
 	}
 	return resp.GetSession(), nil
 }
 
 // WaitForRunning polls GetSession until the session reaches RUNNING (success),
-// FAILED (error), or ctx is cancelled. onStatus is invoked once per observed
-// status transition (including the first observation).
+// FAILED / ARCHIVED (error), or ctx is cancelled. onStatus is invoked once per
+// observed status transition (including the first observation).
 func (c *Client) WaitForRunning(
 	ctx context.Context,
 	sessionID, workspaceID string,
@@ -41,14 +58,10 @@ func (c *Client) WaitForRunning(
 
 	var last codespacesv1.SessionStatus = codespacesv1.SessionStatus_SESSION_STATUS_UNSPECIFIED
 	for {
-		resp, err := c.Service.GetSession(ctx, &codespacesv1.GetSessionRequest{
-			SessionId:   sessionID,
-			WorkspaceId: workspaceID,
-		})
+		s, err := c.getSession(ctx, sessionID, workspaceID)
 		if err != nil {
 			return nil, fmt.Errorf("get session: %w", err)
 		}
-		s := resp.GetSession()
 		if s.GetStatus() != last {
 			last = s.GetStatus()
 			if onStatus != nil {

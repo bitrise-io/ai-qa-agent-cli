@@ -152,7 +152,7 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), flagTimeout)
 	defer cancel()
 
-	client, err := codespaces.NewClient(flagEndpoint, pat, flagInsecure)
+	client, err := codespaces.NewClient(flagEndpoint, pat)
 	if err != nil {
 		return err
 	}

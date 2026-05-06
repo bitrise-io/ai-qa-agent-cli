@@ -1,62 +1,105 @@
 package codespaces
 
 import (
+	"bytes"
 	"context"
-	"crypto/tls"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
-	codespacesv1 "github.com/bitrise-io/bitrise-codespaces/backend/proto/codespaces/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
+// Client is a thin HTTP wrapper around the bitrise-codespaces gRPC-gateway.
+// Requests and responses are still proto messages; protojson handles the
+// JSON wire format that the gateway speaks.
 type Client struct {
-	conn    *grpc.ClientConn
-	Service codespacesv1.CodespacesServiceClient
+	baseURL string
+	pat     string
+	http    *http.Client
+
+	// jsonOpts mirrors what bitrise-codespaces/backend's gateway sends:
+	// lowerCamelCase fields, enums as numeric strings or names — protojson's
+	// defaults match.
+	marshal   protojson.MarshalOptions
+	unmarshal protojson.UnmarshalOptions
 }
 
-func NewClient(endpoint, pat string, useInsecure bool) (*Client, error) {
-	if endpoint == "" {
-		return nil, fmt.Errorf("endpoint is required")
+// NewClient constructs a Client. baseURL must be an absolute URL with scheme
+// (e.g. https://codespaces-api.services.bitrise.io or http://localhost:8081).
+func NewClient(baseURL, pat string) (*Client, error) {
+	if baseURL == "" {
+		return nil, fmt.Errorf("base URL is required")
 	}
 	if pat == "" {
 		return nil, fmt.Errorf("PAT is required")
 	}
-
-	var transport credentials.TransportCredentials
-	if useInsecure {
-		transport = insecure.NewCredentials()
-	} else {
-		transport = credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12})
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return nil, fmt.Errorf("invalid base URL %q (need scheme://host[:port])", baseURL)
 	}
-
-	conn, err := grpc.NewClient(
-		endpoint,
-		grpc.WithTransportCredentials(transport),
-		grpc.WithPerRPCCredentials(bearerCreds{token: pat, requireTLS: !useInsecure}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", endpoint, err)
-	}
-
 	return &Client{
-		conn:    conn,
-		Service: codespacesv1.NewCodespacesServiceClient(conn),
+		baseURL:   strings.TrimRight(baseURL, "/"),
+		pat:       pat,
+		http:      &http.Client{Timeout: 10 * time.Minute},
+		unmarshal: protojson.UnmarshalOptions{DiscardUnknown: true},
 	}, nil
 }
 
-func (c *Client) Close() error {
-	return c.conn.Close()
-}
+// Close is a no-op; kept so callers can defer it without caring whether the
+// underlying transport is gRPC or HTTP.
+func (c *Client) Close() error { return nil }
 
-type bearerCreds struct {
-	token      string
-	requireTLS bool
-}
+// do issues a JSON request to a path relative to the base URL. body and resp
+// are optional proto messages; pass nil to skip either side. Non-2xx
+// responses are wrapped in *httpError so FormatError can expand them.
+func (c *Client) do(ctx context.Context, method, relPath string, body, resp proto.Message) error {
+	var rdr io.Reader
+	if body != nil {
+		raw, err := c.marshal.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal %s body: %w", relPath, err)
+		}
+		rdr = bytes.NewReader(raw)
+	}
 
-func (b bearerCreds) GetRequestMetadata(_ context.Context, _ ...string) (map[string]string, error) {
-	return map[string]string{"authorization": "Bearer " + b.token}, nil
-}
+	fullURL := c.baseURL + relPath
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, rdr)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.pat)
 
-func (b bearerCreds) RequireTransportSecurity() bool { return b.requireTLS }
+	httpResp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", method, fullURL, err)
+	}
+	defer httpResp.Body.Close()
+
+	raw, readErr := io.ReadAll(httpResp.Body)
+	if readErr != nil {
+		return fmt.Errorf("%s %s: read response: %w", method, fullURL, readErr)
+	}
+	if httpResp.StatusCode/100 != 2 {
+		return &httpError{
+			Method:     method,
+			URL:        fullURL,
+			StatusCode: httpResp.StatusCode,
+			Body:       raw,
+		}
+	}
+	if resp != nil && len(raw) > 0 {
+		if err := c.unmarshal.Unmarshal(raw, resp); err != nil {
+			return fmt.Errorf("%s %s: unmarshal response: %w", method, fullURL, err)
+		}
+	}
+	return nil
+}
