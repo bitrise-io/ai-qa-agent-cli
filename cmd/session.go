@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,18 @@ const (
 	// already supplied them.
 	bitriseTokenInputKey       = "BITRISE_TOKEN"
 	bitriseWorkspaceIDInputKey = "BITRISE_WORKSPACE_ID"
+
+	// Optional QA Agent template inputs. Each is forwarded as a session
+	// input only when the caller explicitly sets the corresponding flag —
+	// empty values let the template apply its own defaults. QA_WATCH_DIR
+	// is the exception: we always send it, tied to --upload-destination,
+	// so the watcher trigger and the upload destination cannot drift.
+	deviceTypeInputKey        = "DEVICE_TYPE"
+	iosVersionInputKey        = "IOS_VERSION"
+	xcodeVersionInputKey      = "XCODE_VERSION"
+	qaWatchDirInputKey        = "QA_WATCH_DIR"
+	qaWatchTimeoutSecInputKey = "QA_WATCH_TIMEOUT_SEC"
+	qaWatchPollSecInputKey    = "QA_WATCH_POLL_SEC"
 )
 
 // defaultQAPrompt is sent when --qa-prompt is omitted. It runs a generic
@@ -107,6 +120,11 @@ var (
 	createOpenRemoteAccess     bool
 	createUpload               string
 	createUploadDestination    string
+	createDeviceType           string
+	createIOSVersion           string
+	createXcodeVersion         string
+	createWatchTimeout         time.Duration
+	createWatchPoll            time.Duration
 )
 
 var sessionCreateCmd = &cobra.Command{
@@ -134,7 +152,12 @@ func init() {
 		"When omitted, a built-in smoke-test prompt is used (install + launch the uploaded app and exercise its UI).")
 	f.StringVar(&createUpload, "upload", "", "Local file to upload to the session after it reaches RUNNING")
 	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into. "+
-		"Must match the QA Agent template's QA_WATCH_DIR (default /tmp/bitrise-ai-qa-agent), since that directory becoming non-empty is the watcher's trigger.")
+		"Sent to the template as "+qaWatchDirInputKey+" so the watcher trigger and the upload destination stay in sync.")
+	f.StringVar(&createDeviceType, "device-type", "", "DEVICE_TYPE session input. Simulator device passed to xcrun simctl create. Template default: \"iPhone 15\".")
+	f.StringVar(&createIOSVersion, "ios-version", "", "IOS_VERSION session input. iOS runtime for the simulator. Template default: highest available.")
+	f.StringVar(&createXcodeVersion, "xcode-version", "26.3", "XCODE_VERSION session input. Xcode version selected via DEVELOPER_DIR on the VM (e.g. \"26.3\" → /Applications/Xcode-26.3.app).")
+	f.DurationVar(&createWatchTimeout, "watch-timeout", 0, "QA_WATCH_TIMEOUT_SEC session input. How long the in-VM watcher waits for the upload before giving up. Template default: 30m.")
+	f.DurationVar(&createWatchPoll, "watch-poll", 0, "QA_WATCH_POLL_SEC session input. Watcher poll interval. Template default: 2s.")
 	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", 60, "Minutes before auto-termination (0 disables; -1 leaves backend default). Defaults to 60 so a crashed CLI eventually frees the VM; pass 0 explicitly if you want sessions that don't auto-terminate.")
 	f.BoolVar(&createMapSavedInputs, "map-saved-inputs", true, "Auto-fill template session inputs from caller's saved inputs")
 	f.BoolVar(&createWait, "wait", true, "Poll until session reaches RUNNING")
@@ -172,6 +195,7 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	inputs = ensureBitriseAuthInputs(inputs, pat, createWorkspace)
+	inputs = ensureQAAgentInputs(inputs, createDeviceType, createIOSVersion, createXcodeVersion, createUploadDestination, createWatchTimeout, createWatchPoll)
 
 	req := &codespacesv1.CreateSessionRequest{
 		Name:                    createName,
@@ -316,6 +340,44 @@ func ensureBitriseAuthInputs(inputs []*codespacesv1.SessionInputValue, pat, work
 			Key:   bitriseWorkspaceIDInputKey,
 			Value: workspaceID,
 		})
+	}
+	return inputs
+}
+
+// ensureQAAgentInputs forwards the QA Agent template's optional session
+// inputs (DEVICE_TYPE, IOS_VERSION, watcher knobs) and always sends
+// QA_WATCH_DIR — set to whatever --upload-destination is — so the watcher
+// dir cannot drift from where the upload actually lands. Empty / zero values
+// are skipped so the template's own defaults apply. Already-supplied inputs
+// (via --input / --secret-input / --saved-input) win.
+func ensureQAAgentInputs(
+	inputs []*codespacesv1.SessionInputValue,
+	deviceType, iosVersion, xcodeVersion, watchDir string,
+	watchTimeout, watchPoll time.Duration,
+) []*codespacesv1.SessionInputValue {
+	have := func(key string) bool {
+		for _, in := range inputs {
+			if in.GetKey() == key {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(key, val string) {
+		if val == "" || have(key) {
+			return
+		}
+		inputs = append(inputs, &codespacesv1.SessionInputValue{Key: key, Value: val})
+	}
+	add(deviceTypeInputKey, deviceType)
+	add(iosVersionInputKey, iosVersion)
+	add(xcodeVersionInputKey, xcodeVersion)
+	add(qaWatchDirInputKey, watchDir)
+	if watchTimeout > 0 {
+		add(qaWatchTimeoutSecInputKey, strconv.Itoa(int(watchTimeout.Seconds())))
+	}
+	if watchPoll > 0 {
+		add(qaWatchPollSecInputKey, strconv.Itoa(int(watchPoll.Seconds())))
 	}
 	return inputs
 }
