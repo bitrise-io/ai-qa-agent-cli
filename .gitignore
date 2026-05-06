@@ -30,3 +30,6 @@ go.work.sum
 # Editor/IDE
  .idea/
  .vscode/
+
+# CLI binary built by `go build` at the repo root
+/ai-qa-agent-cli

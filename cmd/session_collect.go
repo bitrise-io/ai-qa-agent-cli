@@ -81,9 +81,9 @@ func runSessionCollect(cmd *cobra.Command, args []string) error {
 	defer client.Close()
 
 	if !collectNoWait {
-		fmt.Fprintln(os.Stderr, "waiting for QA agent to reach IDLE...")
+		logf("waiting for QA agent to reach IDLE...")
 		_, err := client.WaitForAgentIdle(ctx, sessionID, collectWorkspace, collectPollInterval, func(s codespaces.AgentSessionStatus) {
-			fmt.Fprintf(os.Stderr, "  agent_session_status: %s\n", s)
+			logf("  agent_session_status: %s", s)
 		})
 		if err != nil {
 			return fmt.Errorf("waiting for agent: %w", err)
@@ -92,23 +92,23 @@ func runSessionCollect(cmd *cobra.Command, args []string) error {
 		time.Sleep(3 * time.Second)
 	}
 
-	fmt.Fprintf(os.Stderr, "downloading %s -> %s\n", remoteQAAgentDir, destDir)
+	logf("downloading %s -> %s", remoteQAAgentDir, destDir)
 	files, err := client.DownloadDir(ctx, sessionID, collectWorkspace, remoteQAAgentDir, destDir, true)
 	if err != nil {
 		return fmt.Errorf("download results: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "extracted %d file(s):\n", len(files))
+	logf("extracted %d file(s):", len(files))
 	for _, f := range files {
-		fmt.Fprintf(os.Stderr, "  %s\n", f)
+		logf("  %s", f)
 	}
 
 	if !collectNoStop {
-		fmt.Fprintln(os.Stderr, "stopping session...")
+		logf("stopping session...")
 		stopped, err := client.StopSession(ctx, sessionID, collectWorkspace)
 		if err != nil {
 			return fmt.Errorf("stop session: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "  status: %s\n", stopped.Status)
+		logf("  status: %s", stopped.Status)
 	}
 
 	fmt.Println(destDir)

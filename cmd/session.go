@@ -226,11 +226,11 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("CreateSession: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "created session %s (status: %s)\n", session.ID, session.Status)
+	logf("created session %s (status: %s)", session.ID, session.Status)
 
 	if createWait {
 		session, err = client.WaitForRunning(ctx, session.ID, createWorkspace, createPollInterval, func(s codespaces.SessionStatus) {
-			fmt.Fprintf(os.Stderr, "  status: %s\n", s)
+			logf("  status: %s", s)
 		})
 		if err != nil {
 			return err
@@ -242,7 +242,7 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("upload %s: %w", createUpload, err)
 		}
-		fmt.Fprintf(os.Stderr, "uploaded %s -> %s\n", createUpload, actualPath)
+		logf("uploaded %s -> %s", createUpload, actualPath)
 	}
 
 	if createOpenRemoteAccess && session.Status == codespaces.SessionStatusRunning {
@@ -250,16 +250,14 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("OpenRemoteAccess: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "ssh: %s (password: %s)\n", session.SSHAddress, session.SSHPassword)
-		fmt.Fprintf(os.Stderr, "vnc: %s (user: %s, password: %s)\n", session.VNCAddress, session.VNCUsername, session.VNCPassword)
+		logf("ssh: %s (password: %s)", session.SSHAddress, session.SSHPassword)
+		logf("vnc: %s (user: %s, password: %s)", session.VNCAddress, session.VNCUsername, session.VNCPassword)
 	}
 
 	fmt.Println(session.ID)
 	if createUpload != "" {
-		fmt.Fprintf(os.Stderr,
-			"\nWhen the QA run finishes, collect results + stop the VM with:\n"+
-				"  ai-qa-agent-cli session collect %s --workspace %s\n",
-			session.ID, createWorkspace)
+		logf("when the QA run finishes, collect results + stop the VM with:")
+		logf("  ai-qa-agent-cli session collect %s --workspace %s", session.ID, createWorkspace)
 	}
 	return nil
 }
@@ -294,7 +292,7 @@ func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string, isDefault bo
 	if hasPlaceholder {
 		prompt = strings.ReplaceAll(prompt, remotePathPlaceholder, remote)
 	} else if !isDefault && prompt != "" {
-		fmt.Fprintf(os.Stderr, "warning: --qa-prompt does not reference %s; ensure the prompt knows the file's path (%s)\n", remotePathPlaceholder, remote)
+		logf("warning: --qa-prompt does not reference %s; ensure the prompt knows the file's path (%s)", remotePathPlaceholder, remote)
 	}
 	return prompt, remote, nil
 }
