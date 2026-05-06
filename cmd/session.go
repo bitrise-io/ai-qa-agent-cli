@@ -14,7 +14,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const remotePathPlaceholder = "{{REMOTE_PATH}}"
+const (
+	remotePathPlaceholder = "{{REMOTE_PATH}}"
+	// qaPromptInputKey is the session input the QA Agent template's watcher
+	// reads to launch Claude. We do NOT set CreateSessionRequest.AiPrompt
+	// because that would trigger the codespaces backend's claudeAIAutoStart,
+	// which would start a second Claude session at warmup before the upload
+	// has arrived — the watcher inside the template is the only intended
+	// launcher.
+	qaPromptInputKey = "QA_PROMPT"
+)
 
 var sessionCmd = &cobra.Command{
 	Use:   "session",
@@ -31,7 +40,7 @@ var (
 	createSavedInputs          []string
 	createFeatureFlags         []string
 	createCluster              string
-	createAIPrompt             string
+	createQAPrompt             string
 	createAutoTerminateMinutes int32
 	createMapSavedInputs       bool
 	createWait                 bool
@@ -60,12 +69,12 @@ func init() {
 	f.StringArrayVar(&createSavedInputs, "saved-input", nil, "Saved input reference as key=savedInputID (repeatable)")
 	f.StringArrayVar(&createFeatureFlags, "feature-flag", nil, "Feature flag name to enable (repeatable)")
 	f.StringVar(&createCluster, "cluster", "", "Target cluster name (only required when image+machine-type matches multiple clusters)")
-	f.StringVar(&createAIPrompt, "ai-prompt", "", "AI prompt to pass to Claude Code on session start. "+
-		"Any "+remotePathPlaceholder+" is substituted with the remote path of --upload. "+
-		"Note: the binary is uploaded AFTER the session reaches RUNNING, so phrase the prompt to wait for the file "+
-		"(e.g. 'Wait until "+remotePathPlaceholder+" exists, then run it and report output').")
+	f.StringVar(&createQAPrompt, "qa-prompt", "", "QA Agent prompt. Sent to the template as the "+qaPromptInputKey+" session input. "+
+		"Any "+remotePathPlaceholder+" is substituted with the remote path of --upload before submission. "+
+		"The in-VM watcher launches Claude with this prompt once the --upload directory is populated and size-stable.")
 	f.StringVar(&createUpload, "upload", "", "Local file to upload to the session after it reaches RUNNING")
-	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into")
+	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into. "+
+		"Must match the QA Agent template's QA_WATCH_DIR (default /tmp/bitrise-ai-qa-agent), since that directory becoming non-empty is the watcher's trigger.")
 	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", -1, "Minutes before auto-termination (0 disables; -1 leaves backend default)")
 	f.BoolVar(&createMapSavedInputs, "map-saved-inputs", false, "Auto-fill template session inputs from caller's saved inputs")
 	f.BoolVar(&createWait, "wait", true, "Poll until session reaches RUNNING")
@@ -83,12 +92,16 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("%s not set", envPAT)
 	}
 
-	aiPrompt, remotePath, err := resolveUploadAndPrompt(createUpload, createUploadDestination, createAIPrompt)
+	qaPrompt, _, err := resolveUploadAndPrompt(createUpload, createUploadDestination, createQAPrompt)
 	if err != nil {
 		return err
 	}
 
 	inputs, err := buildSessionInputs(createInputs, createSecretInputs, createSavedInputs)
+	if err != nil {
+		return err
+	}
+	inputs, err = injectQAPrompt(inputs, qaPrompt)
 	if err != nil {
 		return err
 	}
@@ -101,7 +114,6 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		SessionInputs:           inputs,
 		EnabledFeatureFlagNames: createFeatureFlags,
 		Cluster:                 createCluster,
-		AiPrompt:                aiPrompt,
 		MapSavedToSessionInputs: createMapSavedInputs,
 	}
 	if createAutoTerminateMinutes >= 0 {
@@ -139,7 +151,6 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("upload %s: %w", createUpload, err)
 		}
 		fmt.Fprintf(os.Stderr, "uploaded %s -> %s\n", createUpload, actualPath)
-		_ = remotePath // resolved earlier for the prompt; logged here from the server's confirmed path
 	}
 
 	if createOpenRemoteAccess && session.GetStatus() == codespacesv1.SessionStatus_SESSION_STATUS_RUNNING {
@@ -163,7 +174,7 @@ func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string) (string, str
 
 	if uploadLocal == "" {
 		if hasPlaceholder {
-			return "", "", fmt.Errorf("--ai-prompt contains %s but --upload is not set", remotePathPlaceholder)
+			return "", "", fmt.Errorf("--qa-prompt contains %s but --upload is not set", remotePathPlaceholder)
 		}
 		return prompt, "", nil
 	}
@@ -184,9 +195,24 @@ func resolveUploadAndPrompt(uploadLocal, uploadDest, prompt string) (string, str
 	if hasPlaceholder {
 		prompt = strings.ReplaceAll(prompt, remotePathPlaceholder, remote)
 	} else if prompt != "" {
-		fmt.Fprintf(os.Stderr, "warning: --ai-prompt does not reference %s; ensure the prompt knows the file's path (%s)\n", remotePathPlaceholder, remote)
+		fmt.Fprintf(os.Stderr, "warning: --qa-prompt does not reference %s; ensure the prompt knows the file's path (%s)\n", remotePathPlaceholder, remote)
 	}
 	return prompt, remote, nil
+}
+
+// injectQAPrompt appends the resolved QA prompt as a QA_PROMPT session input.
+// Errors if the caller already supplied QA_PROMPT via --input / --secret-input
+// / --saved-input — the dedicated --qa-prompt flag is the supported entry point.
+func injectQAPrompt(inputs []*codespacesv1.SessionInputValue, prompt string) ([]*codespacesv1.SessionInputValue, error) {
+	if prompt == "" {
+		return inputs, nil
+	}
+	for _, in := range inputs {
+		if in.GetKey() == qaPromptInputKey {
+			return nil, fmt.Errorf("%s already supplied via --input/--secret-input/--saved-input; use --qa-prompt only", qaPromptInputKey)
+		}
+	}
+	return append(inputs, &codespacesv1.SessionInputValue{Key: qaPromptInputKey, Value: prompt}), nil
 }
 
 func buildSessionInputs(plain, secret, saved []string) ([]*codespacesv1.SessionInputValue, error) {
