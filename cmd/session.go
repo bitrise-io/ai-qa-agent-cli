@@ -98,7 +98,7 @@ func init() {
 	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into. "+
 		"Must match the QA Agent template's QA_WATCH_DIR (default /tmp/bitrise-ai-qa-agent), since that directory becoming non-empty is the watcher's trigger.")
 	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", -1, "Minutes before auto-termination (0 disables; -1 leaves backend default)")
-	f.BoolVar(&createMapSavedInputs, "map-saved-inputs", false, "Auto-fill template session inputs from caller's saved inputs")
+	f.BoolVar(&createMapSavedInputs, "map-saved-inputs", true, "Auto-fill template session inputs from caller's saved inputs")
 	f.BoolVar(&createWait, "wait", true, "Poll until session reaches RUNNING")
 	f.DurationVar(&createPollInterval, "poll-interval", 5*time.Second, "Status poll interval when --wait is set")
 	f.BoolVar(&createOpenRemoteAccess, "open-remote-access", false, "After RUNNING, call OpenRemoteAccess and print SSH/VNC details")

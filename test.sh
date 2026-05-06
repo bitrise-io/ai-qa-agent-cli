@@ -9,7 +9,7 @@ go run main.go \
     --endpoint localhost:9000 --insecure \
     session create \
     --workspace 26e1bb55524221dd \
-    --template  3da102f3-8fd2-444c-8e7f-4c0177049fac \
+    --template  f5195338-297a-4671-92bb-77b66726da94 \
     --name      "ai-qa-agent-cli-session-$(uuidgen | cut -c1-8)" \
     --upload    /tmp/hello-rde \
-    --ai-prompt 'Wait until {{REMOTE_PATH}} exists (poll every 5 seconds for up to 5 minutes). When it appears, run it once with no arguments and paste its complete stdout back to me. Then exit.'
+    --map-saved-inputs
