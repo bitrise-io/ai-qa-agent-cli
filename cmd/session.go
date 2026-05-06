@@ -51,12 +51,14 @@ const (
 const defaultQAPrompt = `You are an iOS QA tester running inside a Bitrise RDE session.
 
 Environment:
-  /tmp/.qa-agent-info.json   { udid, session_id }
-  ~/.qa-agent/upload-path    path to the uploaded app directory
-  ~/.qa-agent/results/       PRE-CREATED. Save ALL artefacts here, FLAT. Bitrise's JUnit attachment convention requires attachment files to sit next to junit.xml — do NOT create subdirectories.
+  ~/.qa-agent/wait-for-deps.sh  PRE-INSTALLED. Run it FIRST. It blocks until the simulator is created and booted and the app upload has stabilised, then writes /tmp/.qa-agent-info.json. The wait can take a few minutes on a cold Xcode — that's expected.
+  /tmp/.qa-agent-info.json     written by wait-for-deps.sh: { udid, session_id }
+  ~/.qa-agent/upload-path      written by wait-for-deps.sh: path to the uploaded app directory
+  ~/.qa-agent/results/         PRE-CREATED. Save ALL artefacts here, FLAT. Bitrise's JUnit attachment convention requires attachment files to sit next to junit.xml — do NOT create subdirectories.
 
 Smoke-test the uploaded app:
-  1. Resolve UDID and the upload directory from the files above.
+  0. Run ~/.qa-agent/wait-for-deps.sh and wait for it to exit 0. Don't begin any other work until it returns.
+  1. Resolve UDID and the upload directory from the files above (jq -r .udid /tmp/.qa-agent-info.json, cat ~/.qa-agent/upload-path).
   2. Find the .app inside the upload directory. If it is an .ipa, unzip it first; the bundle is at Payload/*.app.
   3. xcrun simctl install $UDID <path-to-.app>
   4. Read CFBundleIdentifier from <.app>/Info.plist.
@@ -247,7 +249,7 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		logf("uploaded %s -> %s", createUpload, actualPath)
 
 		if createWaitForAgent {
-			logf("waiting for the in-VM watcher to launch Claude (sim-create + boot run in parallel; can take a few minutes on a non-default Xcode)...")
+			logf("waiting for the in-VM launcher to start Claude in tmux (Claude will then run wait-for-deps.sh itself)...")
 			if _, err := client.WaitForAgentLaunch(ctx, session.ID, createWorkspace, createPollInterval, func(s codespaces.AgentSessionStatus) {
 				logf("  agent_session_status: %s", s)
 			}); err != nil {
