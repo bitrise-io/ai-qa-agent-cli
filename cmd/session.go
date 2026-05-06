@@ -65,7 +65,7 @@ func init() {
 		"Note: the binary is uploaded AFTER the session reaches RUNNING, so phrase the prompt to wait for the file "+
 		"(e.g. 'Wait until "+remotePathPlaceholder+" exists, then run it and report output').")
 	f.StringVar(&createUpload, "upload", "", "Local file to upload to the session after it reaches RUNNING")
-	f.StringVar(&createUploadDestination, "upload-destination", "/tmp", "Absolute remote directory the --upload file is extracted into")
+	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into")
 	f.Int32Var(&createAutoTerminateMinutes, "auto-terminate-minutes", -1, "Minutes before auto-termination (0 disables; -1 leaves backend default)")
 	f.BoolVar(&createMapSavedInputs, "map-saved-inputs", false, "Auto-fill template session inputs from caller's saved inputs")
 	f.BoolVar(&createWait, "wait", true, "Poll until session reaches RUNNING")
