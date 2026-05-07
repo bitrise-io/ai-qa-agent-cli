@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_DIR="${1:-/tmp}"
 APP_NAME="HelloApp"
-APP_BUNDLE="$OUT_DIR/$APP_NA  ME.app"
+APP_BUNDLE="$OUT_DIR/$APP_NAME.app"
 IPA_PATH="$OUT_DIR/$APP_NAME.ipa"
 
 if ! xcrun --sdk iphonesimulator --show-sdk-path >/dev/null 2>&1; then
