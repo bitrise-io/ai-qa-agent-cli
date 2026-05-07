@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bitrise-io/ai-qa-agent-cli/internal/codespaces"
+	"github.com/bitrise-io/ai-qa-agent-cli/internal/qaresults"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +26,8 @@ var (
 	collectResultsDir   string
 	collectNoWait       bool
 	collectNoStop       bool
+	collectNoUpload     bool
+	collectUploadURL    string
 	collectPollInterval time.Duration
 )
 
@@ -55,6 +58,10 @@ func init() {
 		"Skip stopping the session after collection (keeps the VM around for inspection)")
 	f.DurationVar(&collectPollInterval, "poll-interval", 10*time.Second,
 		"How often to poll GetSession while waiting for the agent to reach IDLE")
+	f.BoolVar(&collectNoUpload, "no-upload", false,
+		"Skip uploading the results to the QA results visualisation service")
+	f.StringVar(&collectUploadURL, "upload-url", "",
+		"Override the upload endpoint (default "+qaresults.DefaultURL+", env "+qaresults.EnvURL+")")
 
 	_ = sessionCollectCmd.MarkFlagRequired("workspace")
 }
@@ -100,6 +107,27 @@ func runSessionCollect(cmd *cobra.Command, args []string) error {
 	logf("extracted %d file(s):", len(files))
 	for _, f := range files {
 		logf("  %s", f)
+	}
+
+	if !collectNoUpload {
+		// The agent writes its outputs (junit.xml, summary.md, claude.log,
+		// screenshot-*.png) into ~/.qa-agent/results/, which DownloadDir
+		// extracts as <destDir>/results/. That's the flat folder our service
+		// expects after extraction.
+		resultsRoot := filepath.Join(destDir, "results")
+		if _, err := os.Stat(resultsRoot); err != nil {
+			logf("upload skipped: %s does not exist (%v)", resultsRoot, err)
+		} else {
+			uploader := qaresults.New(collectUploadURL, pat)
+			logf("uploading %s -> %s", resultsRoot, uploader.URL)
+			r, err := uploader.UploadDir(ctx, resultsRoot, nil)
+			if err != nil {
+				logf("upload failed: %v (use --no-upload to skip)", err)
+			} else {
+				logf("  status:  %s (%d/%d passed)", r.Summary.Status, r.Summary.Passed, r.Summary.Total)
+				logf("  view at: %s", uploader.AbsoluteResultURL(r.URL))
+			}
+		}
 	}
 
 	if !collectNoStop {
