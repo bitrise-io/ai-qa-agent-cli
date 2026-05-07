@@ -106,6 +106,7 @@ var (
 	createFeatureFlags         []string
 	createCluster              string
 	createQAPrompt             string
+	createQAPromptFile         string
 	createAutoTerminateMinutes int32
 	createMapSavedInputs       bool
 	createWait                 bool
@@ -143,6 +144,7 @@ func init() {
 	f.StringVar(&createQAPrompt, "qa-prompt", "", "QA Agent prompt. Sent on the session's ai_prompt field, which the codespaces backend exports as $AI_PROMPT to the inner script. "+
 		"Any "+remotePathPlaceholder+" is substituted with the remote path of --upload before submission. "+
 		"When omitted, a built-in smoke-test prompt is used (install + launch the uploaded app and exercise its UI).")
+	f.StringVar(&createQAPromptFile, "qa-prompt-file", "", "Path to a file whose contents are appended to the QA Agent prompt (after --qa-prompt if also set).")
 	f.StringVar(&createUpload, "upload", "", "Local file to upload to the session after it reaches RUNNING")
 	f.StringVar(&createUploadDestination, "upload-destination", "/tmp/bitrise-ai-qa-agent", "Absolute remote directory the --upload file is extracted into. "+
 		"Sent to the template as "+qaWatchDirInputKey+" so the watcher trigger and the upload destination stay in sync.")
@@ -173,12 +175,22 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--xcode-version %q: must be MAJOR[.MINOR[.PATCH]] digits only (e.g. 26.3 or 16.4.1)", createXcodeVersion)
 	}
 
-	usingDefaultPrompt := createQAPrompt == ""
+	usingDefaultPrompt := createQAPrompt == "" && createQAPromptFile == ""
 	var rawPrompt string
 	if usingDefaultPrompt {
 		rawPrompt = defaultQAPrompt
 	} else {
-		rawPrompt = defaultQAPrompt + "\n\n" + createQAPrompt
+		rawPrompt = defaultQAPrompt
+		if createQAPrompt != "" {
+			rawPrompt += "\n\n" + createQAPrompt
+		}
+		if createQAPromptFile != "" {
+			fileBytes, err := os.ReadFile(createQAPromptFile)
+			if err != nil {
+				return fmt.Errorf("--qa-prompt-file: %w", err)
+			}
+			rawPrompt += "\n\n" + string(fileBytes)
+		}
 	}
 
 	qaPrompt, _, err := resolveUploadAndPrompt(createUpload, createUploadDestination, rawPrompt, usingDefaultPrompt)
