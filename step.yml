@@ -1,0 +1,64 @@
+title: AI QA Agent Session
+summary: Run an AI QA agent session against an iOS app and download the results.
+description: |-
+  Creates a Bitrise RDE QA agent session for the given workspace + template,
+  uploads the supplied app file, waits for the QA agent to finish, then
+  downloads the results into ./qa-agent-results/<session-id>/.
+
+  The step fetches the ai-qa-agent-cli binary via `go install`, so Go ≥ 1.25
+  must be on PATH (it is, on Bitrise's macOS stacks).
+website: https://github.com/bitrise-io/ai-qa-agent-cli
+source_code_url: https://github.com/bitrise-io/ai-qa-agent-cli
+support_url: https://github.com/bitrise-io/ai-qa-agent-cli/issues
+type_tags:
+- test
+toolkit:
+  bash:
+    entry_file: step.sh
+inputs:
+- workspace:
+  opts:
+    title: Workspace ID
+    summary: Bitrise workspace UUID hosting the QA agent template.
+    is_required: true
+- template:
+  opts:
+    title: Template ID
+    summary: RDE template UUID to launch.
+    is_required: true
+- upload:
+  opts:
+    title: Path to the app to upload
+    summary: Local path to the .app, .ipa, or other file to upload to the
+      session for the agent to test.
+    is_required: true
+- bitrise_pat: $BITRISE_PAT
+  opts:
+    title: Bitrise personal access token
+    summary: Used to authenticate against the Bitrise API. Must be set.
+    is_sensitive: true
+    is_required: true
+- name:
+  opts:
+    title: Session name
+    summary: Defaults to qa-agent-<build-number>-<random> when blank.
+- timeout: 30m
+  opts:
+    title: Collect timeout
+    summary: Max time to wait for the session to finish (Go duration, e.g.
+      30m, 1h).
+- cli_version: latest
+  opts:
+    title: CLI version
+    summary: Go module version of github.com/bitrise-io/ai-qa-agent-cli to
+      install (e.g. "latest", "v1.2.3", "main").
+outputs:
+- QA_SESSION_ID:
+  opts:
+    title: QA session ID
+    summary: UUID of the created QA agent session.
+- QA_RESULTS_DIR:
+  opts:
+    title: Results directory
+    summary: Absolute path to the downloaded results dir (contains
+      junit.xml + screenshots + claude.log).
