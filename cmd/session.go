@@ -35,6 +35,12 @@ const (
 	qaWatchDirInputKey        = "QA_WATCH_DIR"
 	qaWatchTimeoutSecInputKey = "QA_WATCH_TIMEOUT_SEC"
 	qaWatchPollSecInputKey    = "QA_WATCH_POLL_SEC"
+	// bitrisePATInputKey is the env var name the in-VM upload helper reads.
+	// Sent as a secret session input so the codespaces backend exports it
+	// into warmup.sh / startup.sh / watcher.sh on the VM. Used by the
+	// `ai-qa-agent-cli upload-results` command from watcher.sh after Claude
+	// exits.
+	bitrisePATInputKey = "BITRISE_PAT"
 )
 
 // defaultQAPrompt is sent when --qa-prompt is omitted. It runs a generic
@@ -191,6 +197,11 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	inputs = ensureQAAgentInputs(inputs, createDeviceType, createIOSVersion, createXcodeVersion, createUploadDestination, createWatchTimeout, createWatchPoll)
+	// Forward the user's PAT to the VM so watcher.sh can upload the results
+	// to bitrise-rde-qa-results after Claude exits. Marked secret so the
+	// codespaces backend stores it encrypted and never logs the value.
+	// Caller-supplied --secret-input BITRISE_PAT=… wins over this default.
+	inputs = ensurePATInput(inputs, pat)
 
 	req := &codespaces.CreateSessionRequest{
 		Name:                    createName,
@@ -337,6 +348,26 @@ func ensureQAAgentInputs(
 		add(qaWatchPollSecInputKey, strconv.Itoa(int(watchPoll.Seconds())))
 	}
 	return inputs
+}
+
+// ensurePATInput appends BITRISE_PAT as a secret session input unless the
+// caller already supplied one (via --input / --secret-input / --saved-input)
+// or pat is empty. The watcher on the VM uses this to authenticate the
+// upload to the QA results visualisation service.
+func ensurePATInput(inputs []*codespaces.SessionInputValue, pat string) []*codespaces.SessionInputValue {
+	if pat == "" {
+		return inputs
+	}
+	for _, in := range inputs {
+		if in.Key == bitrisePATInputKey {
+			return inputs
+		}
+	}
+	return append(inputs, &codespaces.SessionInputValue{
+		Key:      bitrisePATInputKey,
+		Value:    pat,
+		IsSecret: true,
+	})
 }
 
 func buildSessionInputs(plain, secret, saved []string) ([]*codespaces.SessionInputValue, error) {
