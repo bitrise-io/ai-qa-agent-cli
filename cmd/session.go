@@ -173,10 +173,12 @@ func runSessionCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--xcode-version %q: must be MAJOR[.MINOR[.PATCH]] digits only (e.g. 26.3 or 16.4.1)", createXcodeVersion)
 	}
 
-	rawPrompt := createQAPrompt
-	usingDefaultPrompt := rawPrompt == ""
+	usingDefaultPrompt := createQAPrompt == ""
+	var rawPrompt string
 	if usingDefaultPrompt {
 		rawPrompt = defaultQAPrompt
+	} else {
+		rawPrompt = defaultQAPrompt + "\n\n" + createQAPrompt
 	}
 
 	qaPrompt, _, err := resolveUploadAndPrompt(createUpload, createUploadDestination, rawPrompt, usingDefaultPrompt)
