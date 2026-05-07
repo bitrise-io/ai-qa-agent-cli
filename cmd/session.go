@@ -43,81 +43,57 @@ const (
 	bitrisePATInputKey = "BITRISE_PAT"
 )
 
-// defaultQAPrompt is the SCAFFOLDING that wraps every QA run. Anything
-// passed via --qa-prompt / --qa-prompt-file is appended after this and
-// becomes the run's "USER TASK" — the specific scenario Claude must
-// validate. With no user-supplied text, the prompt below falls back to a
-// generic smoke test (app launch + screen navigation + crash watch).
+// defaultQAPrompt is sent when --qa-prompt is omitted. It runs a generic
+// smoke test of the uploaded app: install, launch, exercise via the
+// in-VM qa-agent MCP tools, report. Knowledge it relies on is produced by
+// the QA Agent template's startup.sh and watcher.sh.
 const defaultQAPrompt = `You are an iOS QA tester running inside a Bitrise RDE session.
 
-# ENVIRONMENT (already set up by the template; do NOT re-create any of these)
-  ~/.qa-agent/wait-for-deps.sh  Run it FIRST. Blocks until the simulator is created+booted and the app upload has stabilised, then writes /tmp/.qa-agent-info.json. Can take a few minutes on a cold Xcode — that's expected.
+Environment:
+  ~/.qa-agent/wait-for-deps.sh  PRE-INSTALLED. Run it FIRST. It blocks until the simulator is created and booted and the app upload has stabilised, then writes /tmp/.qa-agent-info.json. The wait can take a few minutes on a cold Xcode — that's expected.
   /tmp/.qa-agent-info.json     written by wait-for-deps.sh: { udid, session_id }
   ~/.qa-agent/upload-path      written by wait-for-deps.sh: path to the uploaded app directory
-  ~/.qa-agent/results/         PRE-CREATED. Save ALL artefacts here, FLAT (no subdirs) — Bitrise's JUnit attachment convention requires attachments to sit next to junit.xml.
-  qa-agent MCP server          Pre-registered. Tools: qa_screenshot, qa_click, qa_scroll, qa_type, qa_mouse_drag. ALWAYS call qa_screenshot first so the server learns the real display resolution; pass max_x / max_y matching the screenshot you'll click against.
+  ~/.qa-agent/results/         PRE-CREATED. Save ALL artefacts here, FLAT. Bitrise's JUnit attachment convention requires attachment files to sit next to junit.xml — do NOT create subdirectories.
 
-# SETUP (always, regardless of task)
-  1. Run ~/.qa-agent/wait-for-deps.sh. Block until it exits 0; if it errors, abort the run (write a single junit.xml testcase "infrastructure" with a <failure> noting the wait-for-deps failure, copy claude.log into results/, exit).
-  2. UDID="$(jq -r .udid /tmp/.qa-agent-info.json)".
-  3. UPLOAD_DIR="$(cat ~/.qa-agent/upload-path)". Find the .app inside it (unzip the .ipa first if needed; the bundle is at Payload/*.app).
-  4. xcrun simctl install "$UDID" <path-to-.app>.
-  5. BUNDLE_ID from <.app>/Info.plist (CFBundleIdentifier).
-  6. xcrun simctl launch "$UDID" "$BUNDLE_ID".
+Smoke-test the uploaded app:
+  0. Run ~/.qa-agent/wait-for-deps.sh and wait for it to exit 0. Don't begin any other work until it returns.
+  1. Resolve UDID and the upload directory from the files above (jq -r .udid /tmp/.qa-agent-info.json, cat ~/.qa-agent/upload-path).
+  2. Find the .app inside the upload directory. If it is an .ipa, unzip it first; the bundle is at Payload/*.app.
+  3. xcrun simctl install $UDID <path-to-.app>
+  4. Read CFBundleIdentifier from <.app>/Info.plist.
+  5. xcrun simctl launch $UDID <bundle-id>
+  6. Use the qa-agent MCP server (qa_screenshot, qa_click, qa_scroll, qa_type, qa_mouse_drag) to drive the simulator. Always call qa_screenshot first so the server knows the real display resolution; then tap visible primary buttons, scroll on each screen, and walk through any tab bar or menu. Save each screenshot directly into ~/.qa-agent/results/ as screenshot-NN-<short-tag>.png (zero-padded NN, lowercase tag, no spaces).
+  7. Stop after about 10 interactions or sooner if you hit a crash, an unexpected alert, or a stuck loading state.
+  8. Write results to ~/.qa-agent/results/ (FLAT — no subdirs):
+     a. cp ~/.qa-agent/claude.log ~/.qa-agent/results/claude.log so it can be referenced as a JUnit attachment.
+     b. summary.md — short prose: launched yes/no, screens reached, anomalies, overall PASS or FAIL, list of attached screenshots.
+     c. junit.xml — Surefire-style JUnit XML with <testsuite name="QA Agent"> containing AT LEAST these <testcase> elements:
+        - app_launch (failure if simctl install or launch failed)
+        - screen_navigation (failure if you could not get past the first screen)
+        - no_crashes (failure if you observed a crash, unexpected alert, or stuck loading state)
+        Add more <testcase> elements per major feature you exercised (e.g. login_flow, cart_checkout). For every <testcase>, include a <properties> block listing the screenshots and (on failure) claude.log as Bitrise attachments:
 
-# USER TASK
-The text APPENDED to this prompt is the user's specific scenario for this run. Treat it as the source of truth for what to verify.
+          <testcase name="app_launch" classname="QAAgent" time="3.2">
+            <properties>
+              <property name="attachment_1" value="screenshot-01-launch.png" />
+            </properties>
+          </testcase>
 
-If no extra text was appended, fall back to a generic smoke test: navigate the app like a first-time user — tap obvious primary buttons, scroll on each screen, walk through any tab bar / menu — for ~10 interactions or until you hit a crash, an unexpected alert, or a stuck loading state.
+        - The property name MUST be attachment_<N> with N a 1-based ordered index per testcase.
+        - The value MUST be a bare filename (no path) of a file you wrote into ~/.qa-agent/results/.
+        - Bitrise accepts these extensions for attachments: .jpg .jpeg .png .txt .log .mp4 .webm .ogg.
+        - On failure, add a <failure message="..." type="..."><![CDATA[ details ]]></failure> element inside the <testcase> AND attach claude.log:
 
-While exercising the app:
-  - Call qa_screenshot before every interaction so coordinates rescale correctly.
-  - Save each screenshot into ~/.qa-agent/results/ as screenshot-NN-<short-tag>.png (zero-padded NN, lowercase tag, no spaces).
-  - Note in your reasoning what you saw on each screen and whether the app behaved as expected for the user task. Be specific (matching text content, button states, error toasts).
+          <testcase name="no_crashes" classname="QAAgent" time="42.0">
+            <failure message="Login screen froze" type="StuckLoading"><![CDATA[Spinner remained 30s, no transition. See attachment_2.]]></failure>
+            <properties>
+              <property name="attachment_1" value="screenshot-04-frozen-login.png" />
+              <property name="attachment_2" value="claude.log" />
+            </properties>
+          </testcase>
 
-# REPORTING (always, FLAT layout under ~/.qa-agent/results/)
-  a. cp ~/.qa-agent/claude.log ~/.qa-agent/results/claude.log so failing testcases can attach it.
-
-  b. summary.md — short prose: app launch result, screens reached, what you actually verified vs. the user task, anomalies. END the file with EXACTLY one of these two lines on its own line, with no trailing punctuation:
-       OVERALL: PASS
-       OVERALL: FAIL
-     Use FAIL if any required testcase failed OR was skipped because of an upstream defect (e.g. you couldn't reach a screen because the app crashed).
-
-  c. junit.xml — Surefire-style JUnit. ONE <testsuite name="QA Agent"> containing the testcases below.
-
-# JUNIT TESTCASES — these REQUIRED cases always appear:
-    - app_launch:        FAIL if simctl install or simctl launch errored, or the app process exited within 5s of launch.
-    - screen_navigation: FAIL if you could not get past the first interactive screen (no tap registered, no transition).
-    - no_crashes:        FAIL if you observed a crash, unexpected modal alert, or a load that never resolved.
-
-  Add ADDITIONAL <testcase> elements for every distinct behaviour from the USER TASK that you actually verified or attempted (e.g. login_flow, cart_checkout, search_returns_results). One testcase per behaviour, named in snake_case.
-
-# JUNIT PASS/FAIL DISCIPLINE — strict; do not soften:
-  PASS  → <testcase> with NO <failure> and NO <skipped> child. Only emit a PASS if you ACTUALLY verified the behaviour with a concrete observation (a screenshot showing the expected state, a network request you watched succeed, etc.). If you didn't verify it, do NOT mark it PASS.
-  FAIL  → <testcase> with a <failure message="<short>" type="<category>"><![CDATA[<details, what you saw vs expected>]]></failure> child. ALWAYS attach claude.log as one of the attachments when emitting a failure.
-  SKIPPED → <testcase> with a <skipped message="<reason>"/> child. Use this when an upstream defect prevented you from exercising the case (e.g. login_flow skipped because app_launch failed). For the OVERALL verdict, a skipped REQUIRED case counts as a failure.
-
-# JUNIT ATTACHMENT FORMAT (Bitrise convention — https://docs.bitrise.io/en/bitrise-ci/testing/deploying-and-viewing-test-results.html):
-    <testcase name="app_launch" classname="QAAgent" time="3.2">
-      <properties>
-        <property name="attachment_1" value="screenshot-01-launch.png" />
-      </properties>
-    </testcase>
-
-    <testcase name="login_flow" classname="QAAgent" time="12.4">
-      <failure message="Login button disabled with valid credentials" type="UIBlocked"><![CDATA[Filled email + password matching the spec, the Sign In button stayed greyed out. See attachment_1 (form filled) and attachment_2 (full transcript).]]></failure>
-      <properties>
-        <property name="attachment_1" value="screenshot-04-login-disabled.png" />
-        <property name="attachment_2" value="claude.log" />
-      </properties>
-    </testcase>
-
-  - property name MUST be attachment_<N>, 1-based, contiguous per testcase.
-  - value MUST be a bare filename (no path) you actually wrote into ~/.qa-agent/results/.
-  - Allowed extensions: .jpg .jpeg .png .txt .log .mp4 .webm .ogg.
-  - junit.xml MUST be well-formed XML (every tag balanced; CDATA properly closed). Don't reference attachments you didn't write.
-
-Exit when junit.xml + summary.md are written.
+        Make junit.xml well-formed XML (declaration optional, but balance every tag). Do not point an attachment at a file you did not write.
+  9. Exit when finished.
 `
 
 var sessionCmd = &cobra.Command{
