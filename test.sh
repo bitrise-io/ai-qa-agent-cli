@@ -7,8 +7,7 @@ WORKSPACE=26e1bb55524221dd
 TEMPLATE=f5195338-297a-4671-92bb-77b66726da94
 
 # Build the CLI once and reuse the binary for every command below.
-CLI=/tmp/ai-qa-agent-cli
-go build -o "$CLI" .
+go build -o /tmp/ai-qa-agent-cli .
 
 GOOS=darwin GOARCH=arm64 go build -o /tmp/hello-rde ./examples/hello
 
@@ -16,7 +15,7 @@ GOOS=darwin GOARCH=arm64 go build -o /tmp/hello-rde ./examples/hello
 # (including the UI link) to stderr — capture stdout into SESSION_ID, tee
 # stderr to a log so it both streams through and can be parsed for the link.
 CREATE_LOG=$(mktemp)
-SESSION_ID=$("$CLI" \
+SESSION_ID=$(/tmp/ai-qa-agent-cli \
     session create \
     --workspace "$WORKSPACE" \
     --template  "$TEMPLATE" \
@@ -34,7 +33,7 @@ rm -f "$CREATE_LOG"
 
 # Wait for the QA run to finish, download results into ./qa-agent-results/<id>/,
 # then stop the VM. --timeout 30m is plenty for a smoke test.
-"$CLI" \
+/tmp/ai-qa-agent-cli \
     --timeout 30m \
     session collect "$SESSION_ID" \
     --workspace "$WORKSPACE"
