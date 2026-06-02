@@ -63,7 +63,22 @@ export BITRISE_PAT="<your-bitrise-pat>"
 
 ## Installation
 
-### Option A — prebuilt binary (recommended)
+### Option A — install script (recommended)
+
+Downloads the latest release binary for your platform, verifies its checksum,
+and installs it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bitrise-io/ai-qa-agent-cli/main/install.sh | sh
+```
+
+Override the version or destination with env vars:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bitrise-io/ai-qa-agent-cli/main/install.sh | VERSION=v0.1.0 BIN_DIR="$HOME/.local/bin" sh
+```
+
+### Option B — download the archive manually
 
 Download the archive for your platform from the
 [latest release](https://github.com/bitrise-io/ai-qa-agent-cli/releases/latest),
@@ -85,7 +100,7 @@ sudo mv ai-qa-agent-cli /usr/local/bin/
 Prebuilt binaries are published for `darwin/arm64`, `darwin/amd64`,
 `linux/amd64`, and `linux/arm64`.
 
-### Option B — `go install`
+### Option C — `go install`
 
 Requires Go ≥ 1.25:
 
