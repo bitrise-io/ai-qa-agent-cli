@@ -55,12 +55,21 @@ above captures the ID cleanly. If it exits non-zero, surface the stderr message
 
 ## Step 2 — Make sure the CLI is installed
 
+If `ai-qa-agent-cli` is already on `PATH`, skip this. Otherwise install the
+latest release binary with the install script — it detects the OS/arch,
+verifies the checksum, and needs no Go toolchain:
+
 ```sh
-command -v ai-qa-agent-cli || go install github.com/bitrise-io/ai-qa-agent-cli@latest
+command -v ai-qa-agent-cli >/dev/null || \
+  curl -fsSL https://raw.githubusercontent.com/bitrise-io/ai-qa-agent-cli/main/install.sh | sh
 ```
 
-(Needs Go ≥ 1.25, and `$(go env GOPATH)/bin` on `PATH`. A pinned tag such as
-`@v0.1.0` is preferable to `@latest` for reproducibility.)
+The script installs to `/usr/local/bin` (or `~/.local/bin` as a fallback); if it
+lands in `~/.local/bin`, make sure that's on `PATH`. Override with env vars:
+`VERSION=v0.1.0` pins a release, `BIN_DIR=…` sets the destination.
+
+Fallback (only if `curl`/the release isn't usable) — build from source with
+Go ≥ 1.25: `go install github.com/bitrise-io/ai-qa-agent-cli@latest`.
 
 ## Step 3 — Run the test session
 
