@@ -71,7 +71,10 @@ lands in `~/.local/bin`, make sure that's on `PATH`. Override with env vars:
 Fallback (only if `curl`/the release isn't usable) — build from source with
 Go ≥ 1.25: `go install github.com/bitrise-io/ai-qa-agent-cli@latest`.
 
-## Step 3 — Run the test session
+## Step 3 — Create the session and show the UI link
+
+The session ID is printed on stdout; the progress log (including a `UI:` link)
+goes to stderr. Capture both so you can extract the link:
 
 ```sh
 export BITRISE_PAT="<pat>"   # if not already exported
@@ -80,19 +83,37 @@ SESSION_ID=$(ai-qa-agent-cli session create \
   --workspace "<workspace-id>" \
   --template  "$TEMPLATE_ID" \
   --name      "qa-$(date +%s)" \
-  --upload    "<path-to-app>")
+  --upload    "<path-to-app>" \
+  2> >(tee /tmp/qa-create.log >&2))
   # optional: --qa-prompt "Log in with test/test and verify the home screen"
   # optional: --device-type "iPhone 15" --ios-version 26.2 --xcode-version 26.3
 
-echo "session: $SESSION_ID"
+# Parse the live session UI link from the log (robust to line wrapping).
+UI_LINK=$(grep -oE 'https://[^[:space:]]*dev-environments[^[:space:]]*' /tmp/qa-create.log | head -1)
 
+echo "session: $SESSION_ID"
+echo "watch live: $UI_LINK"
+```
+
+**Once the session is created, show the user the `UI_LINK`** so they can watch
+the agent drive the app live in the browser, e.g.:
+
+> Session `<SESSION_ID>` is running. Watch it live: `<UI_LINK>`
+
+The link has the form
+`https://app.bitrise.io/dev-environments/<workspace-id>#/sessions/<session-id>`.
+If `UI_LINK` comes back empty, fall back to constructing it from those two IDs.
+
+## Step 4 — Collect the results
+
+```sh
 ai-qa-agent-cli session collect "$SESSION_ID" --workspace "<workspace-id>"
 # results land in ./qa-agent-results/<session-id>/ (junit.xml, screenshots, claude.log)
 ```
 
 Report the results directory path and a short summary of `junit.xml` to the user.
 
-## Step 4 (optional) — Publish results to the visualisation service
+## Step 5 (optional) — Publish results to the visualisation service
 
 ```sh
 ai-qa-agent-cli upload-results ./qa-agent-results/<session-id>/
