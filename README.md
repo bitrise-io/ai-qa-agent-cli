@@ -20,15 +20,13 @@ the RDE API if missing — so you can skip the manual template setup below),
 installs the CLI if needed, then creates a session, uploads your app, waits for
 the agent, and downloads the results.
 
-1. Install the skill with [`skills`](https://github.com/vercel-labs/skills)
-   (auto-detects Claude Code):
+1. Install the skill globally with
+   [`skills`](https://github.com/vercel-labs/skills) (auto-detects Claude Code,
+   installs to `~/.claude/skills/` so it's available in every project):
 
    ```sh
-   npx skills add https://github.com/bitrise-io/ai-qa-agent-cli/tree/main/.claude/skills/run-ai-qa-tests
+   npx skills add -g https://github.com/bitrise-io/ai-qa-agent-cli/tree/main/.claude/skills/run-ai-qa-tests
    ```
-
-   Add `-g` to install it globally (to `~/.claude/skills/`) instead of into the
-   current project.
 2. Make sure your Bitrise PAT is available (`export BITRISE_PAT=…`, or
    `~/.bitrise/pat`).
 3. Ask Claude, e.g.:
