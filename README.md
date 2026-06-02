@@ -11,6 +11,29 @@ The same binary also ships the in-VM pieces:
 - `upload-results` — packs a results folder and posts it to the
   `bitrise-rde-qa-results` visualisation service.
 
+## Easiest path: use it with Claude
+
+This repo ships a Claude Code skill, **`run-ai-qa-tests`**
+([`.claude/skills/run-ai-qa-tests/`](.claude/skills/run-ai-qa-tests/)), that
+runs the whole flow for you: it ensures the RDE template exists (creating it via
+the RDE API if missing — so you can skip the manual template setup below),
+installs the CLI if needed, then creates a session, uploads your app, waits for
+the agent, and downloads the results.
+
+1. Open this repo in Claude Code (the skill is auto-discovered from
+   `.claude/skills/`), or copy the `run-ai-qa-tests` folder into
+   `~/.claude/skills/` to make it available everywhere.
+2. Make sure your Bitrise PAT is available (`export BITRISE_PAT=…`, or
+   `~/.bitrise/pat`).
+3. Ask Claude, e.g.:
+
+   > Run AI QA tests on `./MyApp.app` in workspace `<workspace-id>` — check that
+   > login works.
+
+Claude will invoke the skill, which handles template creation and the
+`session create` → `session collect` cycle end to end. The rest of this README
+documents the underlying CLI the skill drives.
+
 ## How it works
 
 ```
